@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { ConversationStore } from './conversationStore';
 
 // Brain directory where Antigravity stores conversations
@@ -28,6 +29,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private store: ConversationStore;
   private workspaceFilter: string | undefined;
+  private cachedSummaries: Record<string, string> = {};
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -73,12 +75,32 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    this.loadSummariesFromState();
     this.updateContent();
   }
 
   refresh(): void {
     this.workspaceFilter = this.getCurrentWorkspaceName();
+    this.loadSummariesFromState();
     this.updateContent();
+  }
+
+  // Load per-conversation summaries by calling the Python extraction script
+  private loadSummariesFromState(): void {
+    try {
+      const scriptPath = path.join(
+        this.extensionUri.fsPath, 'scripts', 'extract_summaries.py',
+      );
+      if (!fs.existsSync(scriptPath)) { return; }
+      const output = execSync(`python "${scriptPath}"`, {
+        timeout: 5000,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      this.cachedSummaries = JSON.parse(output);
+    } catch {
+      // Silently fail -- use fallback summaries
+    }
   }
 
   // Get all conversations matching current filters
@@ -109,7 +131,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         const lastModified = stat.mtimeMs;
         const customName = this.store.getCustomName(id);
         const displayName = customName || this.generateAutoName(id, dirPath);
-        const summary = this.getLatestSummary(dirPath);
+        const summary = this.cachedSummaries[id] || this.getLatestSummary(dirPath);
 
         conversations.push({ id, displayName, lastModified, isPinned, summary });
       }
