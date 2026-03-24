@@ -7,19 +7,36 @@ export class ConversationItem extends vscode.TreeItem {
     public readonly displayName: string,
     public readonly lastModified: number,
     public readonly isPinned: boolean,
+    public readonly summary?: string,
   ) {
     super(displayName, vscode.TreeItemCollapsibleState.None);
 
-    // Format relative time for description
-    this.description = ConversationItem.formatRelativeTime(lastModified);
+    // Description: relative time + truncated summary
+    const timeStr = ConversationItem.formatRelativeTime(lastModified);
+    if (summary) {
+      const shortSummary = summary.length > 60
+        ? summary.substring(0, 57) + '...'
+        : summary;
+      this.description = `${timeStr}  ${shortSummary}`;
+    } else {
+      this.description = timeStr;
+    }
 
-    // Show short ID as tooltip
-    this.tooltip = new vscode.MarkdownString(
-      `**${displayName}**\n\n` +
-      `ID: \`${conversationId}\`\n\n` +
-      `Last active: ${new Date(lastModified).toLocaleString()}\n\n` +
-      (isPinned ? '$(pin) Pinned' : ''),
-    );
+    // Rich tooltip with full summary
+    const tooltipLines = [
+      `**${displayName}**`,
+      '',
+      `ID: \`${conversationId}\``,
+      '',
+      `Last active: ${new Date(lastModified).toLocaleString()}`,
+    ];
+    if (summary) {
+      tooltipLines.push('', '---', '', summary);
+    }
+    if (isPinned) {
+      tooltipLines.push('', '$(pin) Pinned');
+    }
+    this.tooltip = new vscode.MarkdownString(tooltipLines.join('\n'));
 
     // Icon based on pin status
     this.iconPath = isPinned

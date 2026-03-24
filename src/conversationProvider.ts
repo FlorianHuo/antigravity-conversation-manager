@@ -89,8 +89,11 @@ export class ConversationProvider implements vscode.TreeDataProvider<Conversatio
         const customName = this.store.getCustomName(id);
         const displayName = customName || this.generateAutoName(id, dirPath);
 
+        // Get latest summary from metadata files
+        const summary = this.getLatestSummary(dirPath);
+
         conversations.push(
-          new ConversationItem(id, displayName, lastModified, isPinned),
+          new ConversationItem(id, displayName, lastModified, isPinned, summary),
         );
       }
 
@@ -204,5 +207,38 @@ export class ConversationProvider implements vscode.TreeDataProvider<Conversatio
 
     // Fallback: short UUID prefix
     return id.substring(0, 8);
+  }
+
+  // Read all *.metadata.json files and return the summary
+  // from the most recently updated one
+  private getLatestSummary(dirPath: string): string | undefined {
+    try {
+      const files = fs.readdirSync(dirPath);
+      let bestSummary: string | undefined;
+      let bestTime = 0;
+
+      for (const file of files) {
+        if (!file.endsWith('.metadata.json')) {
+          continue;
+        }
+        try {
+          const raw = fs.readFileSync(path.join(dirPath, file), 'utf-8');
+          const meta = JSON.parse(raw);
+          if (meta.summary && meta.updatedAt) {
+            const t = new Date(meta.updatedAt).getTime();
+            if (t > bestTime) {
+              bestTime = t;
+              bestSummary = meta.summary;
+            }
+          }
+        } catch {
+          // Skip malformed metadata
+        }
+      }
+
+      return bestSummary;
+    } catch {
+      return undefined;
+    }
   }
 }
