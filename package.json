@@ -28,11 +28,13 @@
       "conversationManager": [
         {
           "id": "conversationManager.pinnedList",
-          "name": "Pinned"
+          "name": "Pinned",
+          "icon": "$(pinned)"
         },
         {
           "id": "conversationManager.recentList",
-          "name": "Recent"
+          "name": "Recent",
+          "icon": "$(history)"
         }
       ]
     },
