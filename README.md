@@ -29,3 +29,26 @@ npm run compile
 ```
 
 Then reload the Antigravity window (`Cmd+Shift+P` > "Reload Window").
+
+## Workbench Patch
+
+After each Antigravity update, re-apply the workbench patch:
+
+```bash
+python scripts/patch_workbench.py
+```
+
+This injects the `antigravity.switchConversation` command and suppresses the integrity warning.
+
+To restore original files: `python scripts/patch_workbench.py --restore`
+
+## Changelog
+
+### v0.1.0
+
+- Sidebar TreeView with pinned/recent conversations
+- Direct conversation switching via patched `antigravity.switchConversation` command
+- Workbench patch script (`scripts/patch_workbench.py`) with integrity warning suppression
+- Auto-naming from task.md / implementation_plan.md titles
+- Rename, delete, copy ID via context menu
+- Keybindings: `Cmd+Shift+N` (new), `Cmd+Shift+H` (picker)
