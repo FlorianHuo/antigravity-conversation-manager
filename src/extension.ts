@@ -151,17 +151,32 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Open the built-in conversation picker
+  // Open a QuickPick to search and switch conversations
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.openPicker', async () => {
-      try {
-        await vscode.commands.executeCommand('antigravity.openConversationPicker');
-      } catch {
-        try {
-          await vscode.commands.executeCommand('workbench.action.chat.chatSessionPrimaryPicker');
-        } catch {
-          vscode.window.showErrorMessage('Could not open conversation picker.');
-        }
+      const allItems = [
+        ...await pinnedProvider.getChildren(),
+        ...await recentProvider.getChildren(),
+      ];
+
+      const picks = allItems.map((c) => ({
+        label: `${c.isPinned ? '$(pin) ' : ''}${c.displayName}`,
+        description: c.conversationId.slice(0, 8),
+        detail: c.lastModified
+          ? `Last active: ${new Date(c.lastModified).toLocaleString()}`
+          : undefined,
+        conversationId: c.conversationId,
+        displayName: c.displayName,
+      }));
+
+      const selected = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Search conversations...',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (selected) {
+        await switchToConversation(outputChannel, selected.conversationId, selected.displayName);
       }
     }),
   );
