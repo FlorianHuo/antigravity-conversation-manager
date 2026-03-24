@@ -11,16 +11,8 @@ export class ConversationItem extends vscode.TreeItem {
   ) {
     super(displayName, vscode.TreeItemCollapsibleState.None);
 
-    // Description: relative time + truncated summary
-    const timeStr = ConversationItem.formatRelativeTime(lastModified);
-    if (summary) {
-      const shortSummary = summary.length > 60
-        ? summary.substring(0, 57) + '...'
-        : summary;
-      this.description = `${timeStr}  ${shortSummary}`;
-    } else {
-      this.description = timeStr;
-    }
+    // Description: just relative time (summary in tooltip on hover)
+    this.description = ConversationItem.formatRelativeTime(lastModified);
 
     // Rich tooltip with full summary
     const tooltipLines = [
