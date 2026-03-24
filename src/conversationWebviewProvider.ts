@@ -137,7 +137,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     const renderCard = (c: ConversationData) => {
       const timeStr = this.formatRelativeTime(c.lastModified);
       const summaryHtml = c.summary
-        ? `<div class="card-summary">${this.escapeHtml(c.summary)}</div>`
+        ? `<div class="card-summary">${this.escapeHtml(c.summary).replace(/\n/g, '<br>')}</div>`
         : '';
       const pinIcon = c.isPinned ? '<span class="pin-icon">&#128204;</span>' : '';
 
@@ -373,6 +373,11 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private getLatestSummary(dirPath: string): string | undefined {
+    // Priority 1: Last active task items from task.md
+    const taskPreview = this.getTaskPreview(dirPath);
+    if (taskPreview) { return taskPreview; }
+
+    // Priority 2: Most recent metadata.json summary
     try {
       const files = fs.readdirSync(dirPath);
       let bestSummary: string | undefined;
@@ -393,6 +398,44 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         } catch { /* skip */ }
       }
       return bestSummary;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Extract the last completed [x] or in-progress [/] task items from task.md
+  private getTaskPreview(dirPath: string): string | undefined {
+    const taskPath = path.join(dirPath, 'task.md');
+    if (!fs.existsSync(taskPath)) { return undefined; }
+
+    try {
+      const content = fs.readFileSync(taskPath, 'utf-8');
+      const lines = content.split('\n');
+
+      // Find last [x] or [/] items (most recent work)
+      const activeItems: string[] = [];
+      for (let i = lines.length - 1; i >= 0 && activeItems.length < 2; i--) {
+        const line = lines[i].trim();
+        if (line.match(/^-\s*\[(x|\/)\]/)) {
+          // Clean up markdown formatting
+          const item = line
+            .replace(/^-\s*\[(x|\/)\]\s*/, '')
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // strip links
+            .replace(/`([^`]+)`/g, '$1')                // strip backticks
+            .trim();
+          if (item.length > 0) {
+            activeItems.unshift(item);  // keep chronological order
+          }
+        }
+      }
+
+      if (activeItems.length === 0) { return undefined; }
+
+      // Format: show last items with checkmark prefix
+      return activeItems.map((item) => {
+        const truncated = item.length > 80 ? item.substring(0, 77) + '...' : item;
+        return `\u2713 ${truncated}`;
+      }).join('\n');
     } catch {
       return undefined;
     }
