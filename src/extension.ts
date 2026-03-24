@@ -177,6 +177,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+
   // Cleanup
   context.subscriptions.push(outputChannel);
 
