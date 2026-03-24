@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ConversationItem } from './conversationItem';
+import { ConversationItem, ConversationDetailItem } from './conversationItem';
+
+// Union type for all tree items
+type TreeElement = ConversationItem | ConversationDetailItem;
 import { ConversationStore } from './conversationStore';
 
 // Brain directory where Antigravity stores conversations
@@ -16,8 +19,8 @@ const BRAIN_DIR = path.join(
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Provides data for the conversation TreeView
-export class ConversationProvider implements vscode.TreeDataProvider<ConversationItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<ConversationItem | undefined | void>();
+export class ConversationProvider implements vscode.TreeDataProvider<TreeElement> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private store: ConversationStore;
@@ -45,11 +48,20 @@ export class ConversationProvider implements vscode.TreeDataProvider<Conversatio
     this._onDidChangeTreeData.fire();
   }
 
-  getTreeItem(element: ConversationItem): vscode.TreeItem {
+  getTreeItem(element: TreeElement): vscode.TreeItem {
     return element;
   }
 
-  async getChildren(): Promise<ConversationItem[]> {
+  async getChildren(element?: TreeElement): Promise<TreeElement[]> {
+    // If expanding a conversation, return its detail children
+    if (element instanceof ConversationItem && element.summary) {
+      return [new ConversationDetailItem(element, element.summary)];
+    }
+    if (element instanceof ConversationDetailItem) {
+      return [];
+    }
+
+    // Root level: list conversations
     if (!fs.existsSync(BRAIN_DIR)) {
       return [];
     }

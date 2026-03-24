@@ -154,10 +154,13 @@ export function activate(context: vscode.ExtensionContext) {
   // Open a QuickPick to search and switch conversations
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.openPicker', async () => {
-      const allItems = [
+      const rawItems = [
         ...await pinnedProvider.getChildren(),
         ...await recentProvider.getChildren(),
       ];
+      const allItems = rawItems.filter(
+        (c): c is ConversationItem => c instanceof ConversationItem,
+      );
 
       const picks = allItems.map((c) => ({
         label: `${c.isPinned ? '$(pin) ' : ''}${c.displayName}`,

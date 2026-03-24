@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-// Represents a single conversation item in the TreeView
+// Represents a conversation in the TreeView (expandable parent node)
 export class ConversationItem extends vscode.TreeItem {
   constructor(
     public readonly conversationId: string,
@@ -9,12 +9,18 @@ export class ConversationItem extends vscode.TreeItem {
     public readonly isPinned: boolean,
     public readonly summary?: string,
   ) {
-    super(displayName, vscode.TreeItemCollapsibleState.None);
+    // If there's a summary, make it expandable; otherwise flat
+    super(
+      displayName,
+      summary
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
+    );
 
-    // Description: just relative time (summary in tooltip on hover)
+    // Description: relative time
     this.description = ConversationItem.formatRelativeTime(lastModified);
 
-    // Rich tooltip with full summary
+    // Tooltip: full info
     const tooltipLines = [
       `**${displayName}**`,
       '',
@@ -30,23 +36,24 @@ export class ConversationItem extends vscode.TreeItem {
     }
     this.tooltip = new vscode.MarkdownString(tooltipLines.join('\n'));
 
-    // Icon based on pin status
+    // Icon
     this.iconPath = isPinned
       ? new vscode.ThemeIcon('pinned', new vscode.ThemeColor('charts.yellow'))
       : new vscode.ThemeIcon('comment-discussion');
 
-    // Context value for menu filtering
+    // Context for right-click menus
     this.contextValue = isPinned ? 'pinnedConversation' : 'conversation';
 
-    // Click to switch
-    this.command = {
-      command: 'conversationManager.switchTo',
-      title: 'Switch to Conversation',
-      arguments: [this],
-    };
+    // Click to switch (only if no children, otherwise toggle expand)
+    if (!summary) {
+      this.command = {
+        command: 'conversationManager.switchTo',
+        title: 'Switch to Conversation',
+        arguments: [this],
+      };
+    }
   }
 
-  // Format a timestamp as relative time (e.g., "2h ago", "3d ago")
   static formatRelativeTime(timestamp: number): string {
     const now = Date.now();
     const diffMs = now - timestamp;
@@ -68,5 +75,24 @@ export class ConversationItem extends vscode.TreeItem {
       return `${diffDay}d ago`;
     }
     return new Date(timestamp).toLocaleDateString();
+  }
+}
+
+// Child item showing summary text under an expanded conversation
+export class ConversationDetailItem extends vscode.TreeItem {
+  public readonly parentItem: ConversationItem;
+
+  constructor(parent: ConversationItem, summary: string) {
+    super(summary, vscode.TreeItemCollapsibleState.None);
+    this.parentItem = parent;
+    this.iconPath = new vscode.ThemeIcon('info');
+    this.contextValue = 'conversationDetail';
+
+    // Click on summary line also switches to that conversation
+    this.command = {
+      command: 'conversationManager.switchTo',
+      title: 'Switch to Conversation',
+      arguments: [parent],
+    };
   }
 }
