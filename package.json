@@ -27,14 +27,10 @@
     "views": {
       "conversationManager": [
         {
-          "id": "conversationManager.pinnedList",
-          "name": "Pinned",
-          "icon": "$(pinned)"
-        },
-        {
-          "id": "conversationManager.recentList",
-          "name": "Recent",
-          "icon": "$(history)"
+          "type": "webview",
+          "id": "conversationManager.webviewList",
+          "name": "Conversations",
+          "icon": "$(comment-discussion)"
         }
       ]
     },
