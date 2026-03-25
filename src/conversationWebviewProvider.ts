@@ -361,12 +361,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     // Always show pinned conversations
     if (this.store.isPinned(id)) { return true; }
 
-    // Show conversations with no workspace-identifying files (brand new)
-    const identifyingFiles = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
-    const hasAnyFile = identifyingFiles.some((f) => fs.existsSync(path.join(dirPath, f)));
-    const hasSysGen = fs.existsSync(path.join(dirPath, '.system_generated'));
-    if (!hasAnyFile && !hasSysGen) { return true; }
-
     const workspaceName = path.basename(this.workspaceFilter);
 
     const filesToCheck = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
