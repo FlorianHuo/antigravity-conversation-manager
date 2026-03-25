@@ -74,6 +74,9 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    // Render immediately with whatever data we have
+    this.updateContent();
+    // Load summaries in background, re-render when done
     this.loadSummariesAsync().then(() => {
       this.updateContent();
     });
@@ -299,20 +302,13 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
-    <button id="refreshBtn" onclick="doRefresh()">Refresh</button>
+    <button onclick="send('refresh')">Refresh</button>
   </div>
   ${pinnedSection}
   ${recentSection}
   <script>
     const vscode = acquireVsCodeApi();
     function send(type) { vscode.postMessage({ type }); }
-    function doRefresh() {
-      const btn = document.getElementById('refreshBtn');
-      btn.textContent = 'Refreshing...';
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      send('refresh');
-    }
 
     document.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', () => {
@@ -354,6 +350,17 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 
   private isConversationInWorkspace(dirPath: string, id: string): boolean {
     if (!this.workspaceFilter) { return true; }
+
+    // Always show pinned conversations
+    if (this.store.isPinned(id)) { return true; }
+
+    // Always show recent conversations (< 24h) so new ones are visible
+    try {
+      const stat = fs.statSync(dirPath);
+      const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+      if (ageHours < 24) { return true; }
+    } catch { /* skip */ }
+
     const workspaceName = path.basename(this.workspaceFilter);
 
     const filesToCheck = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
@@ -384,7 +391,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       } catch { /* skip */ }
     }
 
-    if (this.store.isPinned(id)) { return true; }
     return false;
   }
 
