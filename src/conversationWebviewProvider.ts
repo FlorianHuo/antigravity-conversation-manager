@@ -386,7 +386,8 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private generateAutoName(id: string, dirPath: string): string {
-    for (const file of ['task.md', 'implementation_plan.md']) {
+    // Priority 1: Heading from artifact files
+    for (const file of ['task.md', 'implementation_plan.md', 'walkthrough.md']) {
       const filePath = path.join(dirPath, file);
       if (fs.existsSync(filePath)) {
         try {
@@ -402,6 +403,47 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         } catch { /* skip */ }
       }
     }
+
+    // Priority 2: Most recent metadata.json summary (first line)
+    try {
+      const files = fs.readdirSync(dirPath);
+      let bestSummary = '';
+      let bestTime = 0;
+      for (const file of files) {
+        if (!file.endsWith('.metadata.json')) { continue; }
+        try {
+          const raw = fs.readFileSync(path.join(dirPath, file), 'utf-8');
+          const meta = JSON.parse(raw);
+          if (meta.summary && meta.updatedAt) {
+            const t = new Date(meta.updatedAt).getTime();
+            if (t > bestTime) { bestTime = t; bestSummary = meta.summary; }
+          }
+        } catch { /* skip */ }
+      }
+      if (bestSummary) {
+        const line = bestSummary.split('\n')[0].trim();
+        if (line.length > 0 && line.length <= 60) { return line; }
+        if (line.length > 60) { return line.substring(0, 57) + '...'; }
+      }
+    } catch { /* skip */ }
+
+    // Priority 3: last_prompt.txt (user's last message)
+    const promptPath = path.join(dirPath, 'last_prompt.txt');
+    if (fs.existsSync(promptPath)) {
+      try {
+        const content = fs.readFileSync(promptPath, 'utf-8').trim();
+        const line = content.split('\n')[0].trim();
+        if (line.length > 0 && line.length <= 60) { return line; }
+        if (line.length > 60) { return line.substring(0, 57) + '...'; }
+      } catch { /* skip */ }
+    }
+
+    // Fallback: check if directory has any files
+    try {
+      const files = fs.readdirSync(dirPath);
+      if (files.length === 0) { return 'New Conversation'; }
+    } catch { /* skip */ }
+
     return id.substring(0, 8);
   }
 
