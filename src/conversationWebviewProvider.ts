@@ -361,6 +361,17 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     // Always show pinned conversations
     if (this.store.isPinned(id)) { return true; }
 
+    // Show empty dirs created in the last 2 hours (new conversations have no workspace info)
+    try {
+      const files = fs.readdirSync(dirPath);
+      if (files.length === 0) {
+        const stat = fs.statSync(dirPath);
+        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours < 2) { return true; }
+        return false; // Old empty dir, hide it
+      }
+    } catch { /* skip */ }
+
     const workspaceName = path.basename(this.workspaceFilter);
 
     const filesToCheck = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
