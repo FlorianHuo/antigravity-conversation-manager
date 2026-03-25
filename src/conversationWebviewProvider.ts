@@ -302,14 +302,21 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
-    <button onclick="send('refresh')">Refresh</button>
+    <button id="refreshBtn" onclick="doRefresh()">Refresh</button>
   </div>
   ${pinnedSection}
   ${recentSection}
   <script>
     const vscode = acquireVsCodeApi();
     function send(type) { vscode.postMessage({ type }); }
-
+    function doRefresh() {
+      const btn = document.getElementById('refreshBtn');
+      btn.textContent = 'Refreshing...';
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      send('refresh');
+      setTimeout(() => { btn.textContent = 'Refresh'; btn.disabled = false; btn.style.opacity = '1'; }, 1500);
+    }
     document.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', () => {
         vscode.postMessage({
@@ -354,12 +361,11 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     // Always show pinned conversations
     if (this.store.isPinned(id)) { return true; }
 
-    // Always show recent conversations (< 24h) so new ones are visible
-    try {
-      const stat = fs.statSync(dirPath);
-      const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
-      if (ageHours < 24) { return true; }
-    } catch { /* skip */ }
+    // Show conversations with no workspace-identifying files (brand new)
+    const identifyingFiles = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
+    const hasAnyFile = identifyingFiles.some((f) => fs.existsSync(path.join(dirPath, f)));
+    const hasSysGen = fs.existsSync(path.join(dirPath, '.system_generated'));
+    if (!hasAnyFile && !hasSysGen) { return true; }
 
     const workspaceName = path.basename(this.workspaceFilter);
 
