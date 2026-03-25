@@ -18,6 +18,7 @@ rm -rf "$TARGET_DIR"
 mkdir -p "$TARGET_DIR/out"
 
 cp -r out/* "$TARGET_DIR/out/"
+cp -r scripts "$TARGET_DIR/scripts"
 cp package.json "$TARGET_DIR/"
 
 echo "Done! Reload Antigravity window to activate."
