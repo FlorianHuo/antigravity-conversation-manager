@@ -108,14 +108,6 @@ export function activate(context: vscode.ExtensionContext) {
   // New conversation
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.newConversation', async () => {
-      // Record brain dir state BEFORE creating new conversation
-      const beforeIds = new Set<string>();
-      if (fs.existsSync(BRAIN_DIR)) {
-        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-          if (e.isDirectory()) { beforeIds.add(e.name); }
-        }
-      }
-
       try {
         await vscode.commands.executeCommand('antigravity.startNewConversation');
         outputChannel.appendLine('Started new conversation via antigravity.startNewConversation');
@@ -133,19 +125,24 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      // After creating, find the new dir and associate with this workspace
-      setTimeout(() => {
-        const ws = getCurrentWorkspace();
-        if (ws && fs.existsSync(BRAIN_DIR)) {
-          for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-            if (e.isDirectory() && !beforeIds.has(e.name)) {
+      // Associate any very recent dirs (< 60s) that have no workspace yet
+      const ws = getCurrentWorkspace();
+      if (ws && fs.existsSync(BRAIN_DIR)) {
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const now = Date.now();
+        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+          if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
+          if (store.getWorkspace(e.name)) { continue; } // already associated
+          try {
+            const stat = fs.statSync(path.join(BRAIN_DIR, e.name));
+            if (now - stat.mtimeMs < 60_000) {
               store.associateWorkspace(e.name, ws);
-              outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
+              outputChannel.appendLine(`Associated recent ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
             }
-          }
+          } catch { /* skip */ }
         }
-        refreshAll();
-      }, 1000);
+      }
+      refreshAll();
     }),
   );
 
