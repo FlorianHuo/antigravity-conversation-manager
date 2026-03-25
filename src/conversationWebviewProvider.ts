@@ -81,10 +81,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 
   refresh(): void {
     this.workspaceFilter = this.getCurrentWorkspaceName();
-    // Run summary extraction async to avoid blocking the UI
-    this.loadSummariesAsync().then(() => {
-      this.updateContent();
-    });
+    this.updateContent();
   }
 
   // Load per-conversation summaries by calling the Python extraction script (async)
