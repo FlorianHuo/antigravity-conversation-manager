@@ -81,11 +81,6 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  // Helper to refresh
-  function refreshAll() {
-    webviewProvider.refresh();
-  }
-
   // Track known conversation IDs and auto-associate new ones with current workspace
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const knownIds = new Set<string>();
@@ -120,11 +115,16 @@ export function activate(context: vscode.ExtensionContext) {
     } catch { /* skip */ }
   }
 
+  // Helper to refresh (also detects new conversations)
+  function refreshAll() {
+    detectAndAssociateNew();
+    webviewProvider.refresh();
+  }
+
   // Watch the brain directory for changes
   if (fs.existsSync(BRAIN_DIR)) {
     try {
       const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => {
-        detectAndAssociateNew();
         refreshAll();
       });
       context.subscriptions.push({ dispose: () => watcher.close() });
