@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
 import { ConversationStore } from './conversationStore';
 
 // Brain directory where Antigravity stores conversations
@@ -75,32 +74,43 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    this.loadSummariesFromState();
-    this.updateContent();
+    this.loadSummariesAsync().then(() => {
+      this.updateContent();
+    });
   }
 
   refresh(): void {
     this.workspaceFilter = this.getCurrentWorkspaceName();
-    this.loadSummariesFromState();
-    this.updateContent();
+    // Run summary extraction async to avoid blocking the UI
+    this.loadSummariesAsync().then(() => {
+      this.updateContent();
+    });
   }
 
-  // Load per-conversation summaries by calling the Python extraction script
-  private loadSummariesFromState(): void {
-    try {
-      const scriptPath = path.join(
-        this.extensionUri.fsPath, 'scripts', 'extract_summaries.py',
-      );
-      if (!fs.existsSync(scriptPath)) { return; }
-      const output = execSync(`python "${scriptPath}"`, {
-        timeout: 5000,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      this.cachedSummaries = JSON.parse(output);
-    } catch {
-      // Silently fail -- use fallback summaries
-    }
+  // Load per-conversation summaries by calling the Python extraction script (async)
+  private loadSummariesAsync(): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        const scriptPath = path.join(
+          this.extensionUri.fsPath, 'scripts', 'extract_summaries.py',
+        );
+        if (!fs.existsSync(scriptPath)) {
+          resolve();
+          return;
+        }
+        const { exec } = require('child_process');
+        exec(`python3 "${scriptPath}"`, { timeout: 2000 }, (err: any, stdout: string) => {
+          if (!err && stdout) {
+            try {
+              this.cachedSummaries = JSON.parse(stdout);
+            } catch { /* parse error */ }
+          }
+          resolve();
+        });
+      } catch {
+        resolve();
+      }
+    });
   }
 
   // Get all conversations matching current filters
