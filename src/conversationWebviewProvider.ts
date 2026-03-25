@@ -71,6 +71,20 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         case 'refresh':
           this.refresh();
           break;
+        case 'rename': {
+          const currentName = this.store.getCustomName(message.id) || '';
+          vscode.window.showInputBox({
+            prompt: 'Enter conversation name',
+            value: currentName,
+            placeHolder: 'e.g. Fix login bug',
+          }).then((name) => {
+            if (name !== undefined) {
+              this.store.rename(message.id, name);
+              this.updateContent();
+            }
+          });
+          break;
+        }
       }
     });
 
@@ -178,7 +192,10 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           <div class="card-header">
             ${pinIcon}
             <span class="card-title">${this.escapeHtml(c.displayName)}</span>
-            <span class="card-time">${timeStr}</span>
+            <span class="card-actions">
+              <span class="action-btn rename-btn" data-id="${c.id}" title="Rename">&#9998;</span>
+              <span class="card-time">${timeStr}</span>
+            </span>
           </div>
           ${summaryHtml}
         </div>
@@ -277,6 +294,21 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       white-space: nowrap;
       flex-shrink: 0;
     }
+    .card-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .action-btn {
+      cursor: pointer;
+      opacity: 0;
+      font-size: 13px;
+      padding: 0 2px;
+      transition: opacity 0.1s;
+    }
+    .card:hover .action-btn { opacity: 0.6; }
+    .action-btn:hover { opacity: 1 !important; }
     .card-summary {
       font-size: 12px;
       color: var(--vscode-descriptionForeground);
@@ -318,12 +350,19 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       setTimeout(() => { btn.textContent = 'Refresh'; btn.disabled = false; btn.style.opacity = '1'; }, 1500);
     }
     document.querySelectorAll('.card').forEach(card => {
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.action-btn')) { return; }
         vscode.postMessage({
           type: 'switchTo',
           id: card.dataset.id,
           name: card.dataset.name,
         });
+      });
+    });
+    document.querySelectorAll('.rename-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'rename', id: btn.dataset.id });
       });
     });
   </script>
