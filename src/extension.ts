@@ -98,6 +98,14 @@ export function activate(context: vscode.ExtensionContext) {
     }
   }
 
+  // Watch for last_prompt.txt changes (real-time prompt capture via global rule 13)
+  const promptWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(BRAIN_DIR, '*/last_prompt.txt'),
+  );
+  promptWatcher.onDidCreate(() => refreshAll());
+  promptWatcher.onDidChange(() => refreshAll());
+  context.subscriptions.push(promptWatcher);
+
   // ---- Commands ----
 
   // New conversation
