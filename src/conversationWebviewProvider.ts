@@ -292,13 +292,20 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
-    <button onclick="send('refresh')">Refresh</button>
+    <button id="refreshBtn" onclick="doRefresh()">Refresh</button>
   </div>
   ${pinnedSection}
   ${recentSection}
   <script>
     const vscode = acquireVsCodeApi();
     function send(type) { vscode.postMessage({ type }); }
+    function doRefresh() {
+      const btn = document.getElementById('refreshBtn');
+      btn.textContent = 'Refreshing...';
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      send('refresh');
+    }
 
     document.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', () => {
