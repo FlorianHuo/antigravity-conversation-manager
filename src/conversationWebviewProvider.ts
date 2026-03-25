@@ -131,7 +131,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         const lastModified = stat.mtimeMs;
         const customName = this.store.getCustomName(id);
         const displayName = customName || this.generateAutoName(id, dirPath);
-        const summary = this.getLastPrompt(dirPath) || this.cachedSummaries[id] || this.getLatestSummary(dirPath);
+        const summary = this.cachedSummaries[id] || this.getLatestSummary(dirPath);
 
         conversations.push({ id, displayName, lastModified, isPinned, summary });
       }
@@ -394,19 +394,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     return id.substring(0, 8);
   }
 
-  // Read last_prompt.txt if it exists (written by AI per global rule 13)
-  private getLastPrompt(dirPath: string): string | undefined {
-    try {
-      const promptFile = path.join(dirPath, 'last_prompt.txt');
-      if (fs.existsSync(promptFile)) {
-        const text = fs.readFileSync(promptFile, 'utf-8').trim();
-        if (text.length > 0) {
-          return '\u{1F4AC} ' + text.slice(0, 200);
-        }
-      }
-    } catch { /* skip */ }
-    return undefined;
-  }
 
   private getLatestSummary(dirPath: string): string | undefined {
     // Priority 1: Last active task items from task.md
