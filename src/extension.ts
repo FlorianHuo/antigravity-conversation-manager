@@ -86,10 +86,45 @@ export function activate(context: vscode.ExtensionContext) {
     webviewProvider.refresh();
   }
 
+  // Track known conversation IDs and auto-associate new ones with current workspace
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const knownIds = new Set<string>();
+
+  // Initial scan: just record existing IDs without associating workspace
+  if (fs.existsSync(BRAIN_DIR)) {
+    try {
+      const entries = fs.readdirSync(BRAIN_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && UUID_RE.test(entry.name)) {
+          knownIds.add(entry.name);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // Detect new directories and auto-associate with current workspace
+  function detectAndAssociateNew() {
+    if (!fs.existsSync(BRAIN_DIR)) { return; }
+    const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!currentWorkspace) { return; }
+    try {
+      const entries = fs.readdirSync(BRAIN_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !UUID_RE.test(entry.name)) { continue; }
+        if (!knownIds.has(entry.name)) {
+          knownIds.add(entry.name);
+          store.associateWorkspace(entry.name, currentWorkspace);
+          outputChannel.appendLine(`Auto-associated ${entry.name.substring(0, 8)} with ${path.basename(currentWorkspace)}`);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
   // Watch the brain directory for changes
   if (fs.existsSync(BRAIN_DIR)) {
     try {
       const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => {
+        detectAndAssociateNew();
         refreshAll();
       });
       context.subscriptions.push({ dispose: () => watcher.close() });

@@ -9,6 +9,7 @@ export interface ConversationMetadata {
   createdAt: number;
   lastModified: number;
   notes?: string;
+  workspace?: string; // Auto-recorded workspace path
 }
 
 // The store persists custom metadata (names, pins) as JSON
@@ -117,5 +118,24 @@ export class ConversationStore {
       }
     }
     return pinned;
+  }
+
+  // Associate a conversation with a workspace (called when new dirs are detected)
+  associateWorkspace(id: string, workspacePath: string): void {
+    const meta = this.data.get(id) || {
+      id,
+      pinned: false,
+      createdAt: Date.now(),
+      lastModified: Date.now(),
+    };
+    if (!meta.workspace) {
+      meta.workspace = workspacePath;
+      this.data.set(id, meta);
+      this.save();
+    }
+  }
+
+  getWorkspace(id: string): string | undefined {
+    return this.data.get(id)?.workspace;
   }
 }
