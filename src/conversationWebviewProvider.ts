@@ -66,7 +66,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           );
           break;
         case 'newConversation':
-          vscode.commands.executeCommand('conversationManager.new');
+          vscode.commands.executeCommand('conversationManager.newConversation');
           break;
         case 'refresh':
           this.refresh();
