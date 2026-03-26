@@ -81,17 +81,40 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   // Helper to get current workspace path
   function getCurrentWorkspace(): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }
 
+  // Associate very new dirs (< 10s) with current workspace
+  function associateNewDirs() {
+    const ws = getCurrentWorkspace();
+    if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
+    const now = Date.now();
+    try {
+      for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+        if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
+        if (store.getWorkspace(e.name)) { continue; }
+        try {
+          const stat = fs.statSync(path.join(BRAIN_DIR, e.name));
+          if (now - stat.birthtimeMs < 10_000) {
+            store.associateWorkspace(e.name, ws);
+            outputChannel.appendLine(`Associated ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+
   // Helper to refresh UI
   function refreshAll() {
+    associateNewDirs();
     webviewProvider.refresh();
   }
 
-  // Watch the brain directory for UI refreshes only (no auto-association)
+  // Watch the brain directory for changes
   if (fs.existsSync(BRAIN_DIR)) {
     try {
       const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => {
@@ -108,58 +131,23 @@ export function activate(context: vscode.ExtensionContext) {
   // New conversation
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.newConversation', async () => {
-      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-      // Snapshot ALL dirs before creating
-      const beforeIds = new Set<string>();
-      if (fs.existsSync(BRAIN_DIR)) {
-        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-          if (e.isDirectory() && UUID_RE.test(e.name)) { beforeIds.add(e.name); }
-        }
-      }
-
       try {
         await vscode.commands.executeCommand('antigravity.startNewConversation');
-        outputChannel.appendLine('Started new conversation via antigravity.startNewConversation');
+        outputChannel.appendLine('Started new conversation');
       } catch {
         try {
           await vscode.commands.executeCommand('antigravity.prioritized.chat.openNewConversation');
-          outputChannel.appendLine('Started new conversation via prioritized.chat.openNewConversation');
         } catch {
           try {
             await vscode.commands.executeCommand('workbench.action.chat.newChat');
-            outputChannel.appendLine('Started new conversation via workbench.action.chat.newChat');
           } catch (err) {
             vscode.window.showErrorMessage(`Failed to create new conversation: ${err}`);
           }
         }
       }
-
-      // Retry detection at multiple intervals to catch the new dir
-      const ws = getCurrentWorkspace();
-      const tryAssociate = () => {
-        if (!ws || !fs.existsSync(BRAIN_DIR)) { return false; }
-        let found = false;
-        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-          if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
-          if (!beforeIds.has(e.name) && !store.getWorkspace(e.name)) {
-            store.associateWorkspace(e.name, ws);
-            outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
-            found = true;
-          }
-        }
-        refreshAll();
-        return found;
-      };
-
-      // Try immediately, then at 1s and 3s
-      if (!tryAssociate()) {
-        setTimeout(() => {
-          if (!tryAssociate()) {
-            setTimeout(() => { tryAssociate(); }, 2000);
-          }
-        }, 1000);
-      }
+      // Retry to catch the new dir (watcher may also catch it)
+      setTimeout(refreshAll, 500);
+      setTimeout(refreshAll, 2000);
     }),
   );
 

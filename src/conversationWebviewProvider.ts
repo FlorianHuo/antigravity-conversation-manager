@@ -85,6 +85,26 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           });
           break;
         }
+        case 'delete': {
+          const displayName = message.name || message.id.substring(0, 8);
+          vscode.window.showWarningMessage(
+            `Delete conversation "${displayName}"? This removes all artifacts.`,
+            { modal: true },
+            'Delete',
+          ).then((choice) => {
+            if (choice === 'Delete') {
+              const dirPath = path.join(
+                process.env.HOME || '', '.gemini', 'antigravity', 'brain', message.id,
+              );
+              try {
+                fs.rmSync(dirPath, { recursive: true, force: true });
+              } catch { /* skip */ }
+              this.store.deleteMetadata(message.id);
+              this.updateContent();
+            }
+          });
+          break;
+        }
       }
     });
 
@@ -194,6 +214,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
             <span class="card-title">${this.escapeHtml(c.displayName)}</span>
             <span class="card-actions">
               <span class="action-btn rename-btn" data-id="${c.id}" title="Rename">&#9998;</span>
+              <span class="action-btn delete-btn" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}" title="Delete">&#128465;</span>
               <span class="card-time">${timeStr}</span>
             </span>
           </div>
@@ -363,6 +384,12 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'rename', id: btn.dataset.id });
+      });
+    });
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'delete', id: btn.dataset.id, name: btn.dataset.name });
       });
     });
   </script>
