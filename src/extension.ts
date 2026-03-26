@@ -108,6 +108,16 @@ export function activate(context: vscode.ExtensionContext) {
   // New conversation
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.newConversation', async () => {
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // Snapshot ALL dirs before creating
+      const beforeIds = new Set<string>();
+      if (fs.existsSync(BRAIN_DIR)) {
+        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+          if (e.isDirectory() && UUID_RE.test(e.name)) { beforeIds.add(e.name); }
+        }
+      }
+
       try {
         await vscode.commands.executeCommand('antigravity.startNewConversation');
         outputChannel.appendLine('Started new conversation via antigravity.startNewConversation');
@@ -125,24 +135,31 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      // Associate any very recent dirs (< 60s) that have no workspace yet
+      // Retry detection at multiple intervals to catch the new dir
       const ws = getCurrentWorkspace();
-      if (ws && fs.existsSync(BRAIN_DIR)) {
-        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const now = Date.now();
+      const tryAssociate = () => {
+        if (!ws || !fs.existsSync(BRAIN_DIR)) { return false; }
+        let found = false;
         for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
           if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
-          if (store.getWorkspace(e.name)) { continue; } // already associated
-          try {
-            const stat = fs.statSync(path.join(BRAIN_DIR, e.name));
-            if (now - stat.mtimeMs < 60_000) {
-              store.associateWorkspace(e.name, ws);
-              outputChannel.appendLine(`Associated recent ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
-            }
-          } catch { /* skip */ }
+          if (!beforeIds.has(e.name) && !store.getWorkspace(e.name)) {
+            store.associateWorkspace(e.name, ws);
+            outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
+            found = true;
+          }
         }
+        refreshAll();
+        return found;
+      };
+
+      // Try immediately, then at 1s and 3s
+      if (!tryAssociate()) {
+        setTimeout(() => {
+          if (!tryAssociate()) {
+            setTimeout(() => { tryAssociate(); }, 2000);
+          }
+        }, 1000);
       }
-      refreshAll();
     }),
   );
 
