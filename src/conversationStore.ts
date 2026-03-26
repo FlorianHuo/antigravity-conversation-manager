@@ -9,10 +9,11 @@ export interface ConversationMetadata {
   createdAt: number;
   lastModified: number;
   notes?: string;
-  workspace?: string; // Auto-recorded workspace path
+  workspace?: string;
+  order?: number; // Custom display order (lower = higher)
 }
 
-// The store persists custom metadata (names, pins) as JSON
+// The store persists custom metadata (names, pins, workspace, order) as JSON
 export class ConversationStore {
   private storePath: string;
   private data: Map<string, ConversationMetadata> = new Map();
@@ -32,7 +33,6 @@ export class ConversationStore {
         }
       }
     } catch {
-      // If corrupted, start fresh
       this.data = new Map();
     }
   }
@@ -47,6 +47,15 @@ export class ConversationStore {
       obj[key] = val;
     }
     fs.writeFileSync(this.storePath, JSON.stringify(obj, null, 2), 'utf-8');
+  }
+
+  private getOrCreate(id: string): ConversationMetadata {
+    return this.data.get(id) || {
+      id,
+      pinned: false,
+      createdAt: Date.now(),
+      lastModified: Date.now(),
+    };
   }
 
   // Get or create metadata for a conversation
@@ -65,24 +74,14 @@ export class ConversationStore {
   }
 
   rename(id: string, name: string): void {
-    const meta = this.data.get(id) || {
-      id,
-      pinned: false,
-      createdAt: Date.now(),
-      lastModified: Date.now(),
-    };
+    const meta = this.getOrCreate(id);
     meta.customName = name;
     this.data.set(id, meta);
     this.save();
   }
 
   pin(id: string): void {
-    const meta = this.data.get(id) || {
-      id,
-      pinned: false,
-      createdAt: Date.now(),
-      lastModified: Date.now(),
-    };
+    const meta = this.getOrCreate(id);
     meta.pinned = true;
     this.data.set(id, meta);
     this.save();
@@ -113,23 +112,28 @@ export class ConversationStore {
   getAllPinnedIds(): string[] {
     const pinned: string[] = [];
     for (const [id, meta] of this.data) {
-      if (meta.pinned) {
-        pinned.push(id);
-      }
+      if (meta.pinned) { pinned.push(id); }
     }
     return pinned;
   }
 
-  // Associate a conversation with a workspace (called when new dirs are detected)
+  // Workspace association
   associateWorkspace(id: string, workspacePath: string): void {
-    const meta = this.data.get(id) || {
-      id,
-      pinned: false,
-      createdAt: Date.now(),
-      lastModified: Date.now(),
-    };
-    if (!meta.workspace) {
-      meta.workspace = workspacePath;
+    const meta = this.getOrCreate(id);
+    meta.workspace = workspacePath;
+    // Assign next order number if not set
+    if (meta.order === undefined) {
+      meta.order = this.getNextOrder();
+    }
+    this.data.set(id, meta);
+    this.save();
+  }
+
+  removeWorkspace(id: string): void {
+    const meta = this.data.get(id);
+    if (meta) {
+      delete meta.workspace;
+      delete meta.order;
       this.data.set(id, meta);
       this.save();
     }
@@ -137,5 +141,32 @@ export class ConversationStore {
 
   getWorkspace(id: string): string | undefined {
     return this.data.get(id)?.workspace;
+  }
+
+  // Ordering
+  getOrder(id: string): number {
+    return this.data.get(id)?.order ?? 999999;
+  }
+
+  setOrder(id: string, order: number): void {
+    const meta = this.getOrCreate(id);
+    meta.order = order;
+    this.data.set(id, meta);
+    this.save();
+  }
+
+  swapOrder(idA: string, idB: string): void {
+    const orderA = this.getOrder(idA);
+    const orderB = this.getOrder(idB);
+    this.setOrder(idA, orderB);
+    this.setOrder(idB, orderA);
+  }
+
+  private getNextOrder(): number {
+    let max = 0;
+    for (const meta of this.data.values()) {
+      if (meta.order !== undefined && meta.order > max) { max = meta.order; }
+    }
+    return max + 1;
   }
 }

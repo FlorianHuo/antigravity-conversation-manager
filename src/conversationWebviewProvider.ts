@@ -19,6 +19,7 @@ interface ConversationData {
   lastModified: number;
   isPinned: boolean;
   summary?: string;
+  order: number;
 }
 
 // WebviewView-based conversation panel with rich HTML cards
@@ -52,11 +53,8 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ) {
     this._view = webviewView;
-    webviewView.webview.options = {
-      enableScripts: true,
-    };
+    webviewView.webview.options = { enableScripts: true };
 
-    // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.type) {
         case 'switchTo':
@@ -67,6 +65,9 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           break;
         case 'newConversation':
           vscode.commands.executeCommand('conversationManager.newConversation');
+          break;
+        case 'addExisting':
+          vscode.commands.executeCommand('conversationManager.addExisting');
           break;
         case 'refresh':
           this.refresh();
@@ -85,35 +86,51 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           });
           break;
         }
+        case 'remove': {
+          // Remove from sidebar (clear workspace association) but keep brain dir
+          this.store.removeWorkspace(message.id);
+          this.updateContent();
+          break;
+        }
         case 'delete': {
           const displayName = message.name || message.id.substring(0, 8);
           vscode.window.showWarningMessage(
-            `Delete conversation "${displayName}"? This removes all artifacts.`,
+            `Delete conversation "${displayName}"? This permanently removes all artifacts.`,
             { modal: true },
             'Delete',
           ).then((choice) => {
             if (choice === 'Delete') {
-              const dirPath = path.join(
-                process.env.HOME || '', '.gemini', 'antigravity', 'brain', message.id,
-              );
-              try {
-                fs.rmSync(dirPath, { recursive: true, force: true });
-              } catch { /* skip */ }
+              const dirPath = path.join(BRAIN_DIR, message.id);
+              try { fs.rmSync(dirPath, { recursive: true, force: true }); } catch { /* skip */ }
               this.store.deleteMetadata(message.id);
               this.updateContent();
             }
           });
           break;
         }
+        case 'moveUp': {
+          const conversations = this.getConversations();
+          const idx = conversations.findIndex((c) => c.id === message.id);
+          if (idx > 0) {
+            this.store.swapOrder(conversations[idx].id, conversations[idx - 1].id);
+            this.updateContent();
+          }
+          break;
+        }
+        case 'moveDown': {
+          const conversations = this.getConversations();
+          const idx = conversations.findIndex((c) => c.id === message.id);
+          if (idx >= 0 && idx < conversations.length - 1) {
+            this.store.swapOrder(conversations[idx].id, conversations[idx + 1].id);
+            this.updateContent();
+          }
+          break;
+        }
       }
     });
 
-    // Render immediately with whatever data we have
     this.updateContent();
-    // Load summaries in background, re-render when done
-    this.loadSummariesAsync().then(() => {
-      this.updateContent();
-    });
+    this.loadSummariesAsync().then(() => { this.updateContent(); });
   }
 
   refresh(): void {
@@ -121,52 +138,42 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     this.updateContent();
   }
 
-  // Load per-conversation summaries by calling the Python extraction script (async)
+  // Public: used by extension's addExisting command
+  public generateAutoNamePublic(id: string, dirPath: string): string {
+    return this.generateAutoName(id, dirPath);
+  }
+
   private loadSummariesAsync(): Promise<void> {
     return new Promise((resolve) => {
       try {
-        const scriptPath = path.join(
-          this.extensionUri.fsPath, 'scripts', 'extract_summaries.py',
-        );
-        if (!fs.existsSync(scriptPath)) {
-          resolve();
-          return;
-        }
+        const scriptPath = path.join(this.extensionUri.fsPath, 'scripts', 'extract_summaries.py');
+        if (!fs.existsSync(scriptPath)) { resolve(); return; }
         const { exec } = require('child_process');
         exec(`python3 "${scriptPath}"`, { timeout: 2000 }, (err: any, stdout: string) => {
           if (!err && stdout) {
-            try {
-              this.cachedSummaries = JSON.parse(stdout);
-            } catch { /* parse error */ }
+            try { this.cachedSummaries = JSON.parse(stdout); } catch { /* parse error */ }
           }
           resolve();
         });
-      } catch {
-        resolve();
-      }
+      } catch { resolve(); }
     });
   }
 
-  // Get all conversations matching current filters
+  // Get conversations matching workspace filter, sorted by custom order
   getConversations(): ConversationData[] {
-    if (!fs.existsSync(BRAIN_DIR)) {
-      return [];
-    }
+    if (!fs.existsSync(BRAIN_DIR)) { return []; }
 
     try {
       const entries = fs.readdirSync(BRAIN_DIR, { withFileTypes: true });
       const conversations: ConversationData[] = [];
 
       for (const entry of entries) {
-        if (!entry.isDirectory() || !UUID_REGEX.test(entry.name)) {
-          continue;
-        }
+        if (!entry.isDirectory() || !UUID_REGEX.test(entry.name)) { continue; }
 
         const dirPath = path.join(BRAIN_DIR, entry.name);
         const id = entry.name;
         const isPinned = this.store.isPinned(id);
 
-        // Workspace filter
         if (this.workspaceFilter && !this.isConversationInWorkspace(dirPath, id)) {
           continue;
         }
@@ -176,11 +183,16 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         const customName = this.store.getCustomName(id);
         const displayName = customName || this.generateAutoName(id, dirPath);
         const summary = this.cachedSummaries[id] || this.getLatestSummary(dirPath);
+        const order = this.store.getOrder(id);
 
-        conversations.push({ id, displayName, lastModified, isPinned, summary });
+        conversations.push({ id, displayName, lastModified, isPinned, summary, order });
       }
 
-      conversations.sort((a, b) => b.lastModified - a.lastModified);
+      // Sort by custom order (lower first), then by lastModified as tiebreaker
+      conversations.sort((a, b) => {
+        if (a.order !== b.order) { return a.order - b.order; }
+        return b.lastModified - a.lastModified;
+      });
       return conversations;
     } catch {
       return [];
@@ -188,19 +200,13 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private updateContent(): void {
-    if (!this._view) {
-      return;
-    }
-
+    if (!this._view) { return; }
     const conversations = this.getConversations();
-    const pinned = conversations.filter((c) => c.isPinned);
-    const recent = conversations.filter((c) => !c.isPinned);
-
-    this._view.webview.html = this.getHtml(pinned, recent);
+    this._view.webview.html = this.getHtml(conversations);
   }
 
-  private getHtml(pinned: ConversationData[], recent: ConversationData[]): string {
-    const renderCard = (c: ConversationData) => {
+  private getHtml(conversations: ConversationData[]): string {
+    const renderCard = (c: ConversationData, idx: number, total: number) => {
       const timeStr = this.formatRelativeTime(c.lastModified);
       const summaryHtml = c.summary
         ? `<div class="card-summary">${this.escapeHtml(c.summary).replace(/\n/g, '<br>')}</div>`
@@ -213,8 +219,11 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
             ${pinIcon}
             <span class="card-title">${this.escapeHtml(c.displayName)}</span>
             <span class="card-actions">
+              ${idx > 0 ? `<span class="action-btn move-btn" data-id="${c.id}" data-dir="up" title="Move up">&uarr;</span>` : ''}
+              ${idx < total - 1 ? `<span class="action-btn move-btn" data-id="${c.id}" data-dir="down" title="Move down">&darr;</span>` : ''}
               <span class="action-btn rename-btn" data-id="${c.id}" title="Rename">&#9998;</span>
-              <span class="action-btn delete-btn" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}" title="Delete">&#128465;</span>
+              <span class="action-btn remove-btn" data-id="${c.id}" title="Remove from sidebar">&times;</span>
+              <span class="action-btn delete-btn" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}" title="Delete permanently">&#128465;</span>
               <span class="card-time">${timeStr}</span>
             </span>
           </div>
@@ -223,22 +232,9 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       `;
     };
 
-    const pinnedSection = pinned.length > 0
-      ? `<div class="section">
-           <div class="section-title">Pinned</div>
-           ${pinned.map(renderCard).join('')}
-         </div>`
-      : '';
-
-    const recentSection = `
-      <div class="section">
-        <div class="section-title">Recent</div>
-        ${recent.length > 0
-          ? recent.map(renderCard).join('')
-          : '<div class="empty">No conversations found</div>'
-        }
-      </div>
-    `;
+    const cardsHtml = conversations.length > 0
+      ? conversations.map((c, i) => renderCard(c, i, conversations.length)).join('')
+      : '<div class="empty">No conversations. Click "+ New" or "+ Add" to get started.</div>';
 
     return `<!DOCTYPE html>
 <html>
@@ -271,16 +267,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     .toolbar button:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
-    .section { margin-bottom: 12px; }
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 6px;
-      padding: 0 4px;
-    }
     .card {
       padding: 8px 10px;
       margin-bottom: 4px;
@@ -299,7 +285,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       display: flex;
       align-items: center;
       gap: 6px;
-      margin-bottom: 4px;
     }
     .card-title {
       font-weight: 600;
@@ -318,7 +303,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     .card-actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
       flex-shrink: 0;
     }
     .action-btn {
@@ -328,12 +313,14 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       padding: 0 2px;
       transition: opacity 0.1s;
     }
-    .card:hover .action-btn { opacity: 0.6; }
+    .card:hover .action-btn { opacity: 0.5; }
     .action-btn:hover { opacity: 1 !important; }
+    .remove-btn { font-size: 16px; font-weight: bold; }
     .card-summary {
       font-size: 12px;
       color: var(--vscode-descriptionForeground);
       line-height: 1.4;
+      margin-top: 4px;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
@@ -347,7 +334,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     .empty {
       font-size: 12px;
       color: var(--vscode-descriptionForeground);
-      padding: 8px;
+      padding: 16px 8px;
       text-align: center;
     }
   </style>
@@ -355,10 +342,10 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
+    <button onclick="send('addExisting')">+ Add</button>
     <button id="refreshBtn" onclick="doRefresh()">Refresh</button>
   </div>
-  ${pinnedSection}
-  ${recentSection}
+  ${cardsHtml}
   <script>
     const vscode = acquireVsCodeApi();
     function send(type) { vscode.postMessage({ type }); }
@@ -373,11 +360,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     document.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (e.target.closest('.action-btn')) { return; }
-        vscode.postMessage({
-          type: 'switchTo',
-          id: card.dataset.id,
-          name: card.dataset.name,
-        });
+        vscode.postMessage({ type: 'switchTo', id: card.dataset.id, name: card.dataset.name });
       });
     });
     document.querySelectorAll('.rename-btn').forEach(btn => {
@@ -386,10 +369,22 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         vscode.postMessage({ type: 'rename', id: btn.dataset.id });
       });
     });
+    document.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'remove', id: btn.dataset.id });
+      });
+    });
     document.querySelectorAll('.delete-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         vscode.postMessage({ type: 'delete', id: btn.dataset.id, name: btn.dataset.name });
+      });
+    });
+    document.querySelectorAll('.move-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: btn.dataset.dir === 'up' ? 'moveUp' : 'moveDown', id: btn.dataset.id });
       });
     });
   </script>
@@ -419,24 +414,21 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       .replace(/"/g, '&quot;');
   }
 
-  // --- Data extraction methods (same as ConversationProvider) ---
+  // --- Data extraction methods ---
 
   private isConversationInWorkspace(dirPath: string, id: string): boolean {
     if (!this.workspaceFilter) { return true; }
-
-    // Always show pinned conversations
     if (this.store.isPinned(id)) { return true; }
 
-    // Check stored workspace association (set by extension on first detection)
+    // Check stored workspace association
     const storedWorkspace = this.store.getWorkspace(id);
     if (storedWorkspace) {
       return storedWorkspace === this.workspaceFilter;
     }
 
-    // Fallback: check file content for workspace name (for older conversations)
+    // Fallback: check file content for workspace name
     const workspaceName = path.basename(this.workspaceFilter);
-    const filesToCheck = ['task.md', 'implementation_plan.md', 'walkthrough.md'];
-    for (const file of filesToCheck) {
+    for (const file of ['task.md', 'implementation_plan.md', 'walkthrough.md']) {
       const filePath = path.join(dirPath, file);
       if (fs.existsSync(filePath)) {
         try {
@@ -470,7 +462,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // Priority 2: Most recent metadata.json summary (first line)
+    // Priority 2: metadata.json summary
     try {
       const files = fs.readdirSync(dirPath);
       let bestSummary = '';
@@ -493,7 +485,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       }
     } catch { /* skip */ }
 
-    // Priority 3: last_prompt.txt (user's last message)
+    // Priority 3: last_prompt.txt
     const promptPath = path.join(dirPath, 'last_prompt.txt');
     if (fs.existsSync(promptPath)) {
       try {
@@ -504,7 +496,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       } catch { /* skip */ }
     }
 
-    // Fallback: check if directory has any files
+    // Fallback
     try {
       const files = fs.readdirSync(dirPath);
       if (files.length === 0) { return 'New Conversation'; }
@@ -513,18 +505,14 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     return id.substring(0, 8);
   }
 
-
   private getLatestSummary(dirPath: string): string | undefined {
-    // Priority 1: Last active task items from task.md
     const taskPreview = this.getTaskPreview(dirPath);
     if (taskPreview) { return taskPreview; }
 
-    // Priority 2: Most recent metadata.json summary
     try {
       const files = fs.readdirSync(dirPath);
       let bestSummary: string | undefined;
       let bestTime = 0;
-
       for (const file of files) {
         if (!file.endsWith('.metadata.json')) { continue; }
         try {
@@ -532,10 +520,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           const meta = JSON.parse(raw);
           if (meta.summary && meta.updatedAt) {
             const t = new Date(meta.updatedAt).getTime();
-            if (t > bestTime) {
-              bestTime = t;
-              bestSummary = meta.summary;
-            }
+            if (t > bestTime) { bestTime = t; bestSummary = meta.summary; }
           }
         } catch { /* skip */ }
       }
@@ -545,7 +530,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // Extract the last completed [x] or in-progress [/] task items from task.md
   private getTaskPreview(dirPath: string): string | undefined {
     const taskPath = path.join(dirPath, 'task.md');
     if (!fs.existsSync(taskPath)) { return undefined; }
@@ -553,27 +537,19 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     try {
       const content = fs.readFileSync(taskPath, 'utf-8');
       const lines = content.split('\n');
-
-      // Find last [x] or [/] items (most recent work)
       const activeItems: string[] = [];
       for (let i = lines.length - 1; i >= 0 && activeItems.length < 2; i--) {
         const line = lines[i].trim();
         if (line.match(/^-\s*\[(x|\/)\]/)) {
-          // Clean up markdown formatting
           const item = line
             .replace(/^-\s*\[(x|\/)\]\s*/, '')
-            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // strip links
-            .replace(/`([^`]+)`/g, '$1')                // strip backticks
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
             .trim();
-          if (item.length > 0) {
-            activeItems.unshift(item);  // keep chronological order
-          }
+          if (item.length > 0) { activeItems.unshift(item); }
         }
       }
-
       if (activeItems.length === 0) { return undefined; }
-
-      // Format: show last items with checkmark prefix
       return activeItems.map((item) => {
         const truncated = item.length > 80 ? item.substring(0, 77) + '...' : item;
         return `\u2713 ${truncated}`;

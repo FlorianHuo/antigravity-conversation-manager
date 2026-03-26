@@ -12,10 +12,10 @@ const BRAIN_DIR = path.join(
   'brain',
 );
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
 /**
@@ -32,13 +32,9 @@ async function switchToConversation(
 
   const availableCommands = new Set(await vscode.commands.getCommands(true));
 
-  // Primary: patched workbench command
   if (availableCommands.has('antigravity.switchConversation')) {
     try {
-      await vscode.commands.executeCommand(
-        'antigravity.switchConversation',
-        conversationId,
-      );
+      await vscode.commands.executeCommand('antigravity.switchConversation', conversationId);
       outputChannel.appendLine('  Switch successful via antigravity.switchConversation');
       outputChannel.appendLine('=== Switch completed ===');
       return;
@@ -47,7 +43,6 @@ async function switchToConversation(
     }
   }
 
-  // Fallback: open the Agent panel, then use the internal focus manager
   outputChannel.appendLine('  Patched command not available, using fallback...');
   try {
     await vscode.commands.executeCommand('antigravity.forceFocusManager');
@@ -60,19 +55,14 @@ async function switchToConversation(
   outputChannel.appendLine('=== Switch completed ===');
 }
 
-// Flag to prevent concurrent switches
 let switchInProgress = false;
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Conversation Manager');
   outputChannel.appendLine('Conversation Manager activating...');
 
-  // Initialize store
-  const store = new ConversationStore(
-    context.globalStorageUri.fsPath,
-  );
+  const store = new ConversationStore(context.globalStorageUri.fsPath);
 
-  // Register WebviewView provider
   const webviewProvider = new ConversationWebviewProvider(context.extensionUri, store);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -81,45 +71,18 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-  // Helper to get current workspace path
   function getCurrentWorkspace(): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }
 
-  // Associate very new dirs (< 10s) with current workspace
-  function associateNewDirs() {
-    const ws = getCurrentWorkspace();
-    if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
-    const now = Date.now();
-    try {
-      for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-        if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
-        if (store.getWorkspace(e.name)) { continue; }
-        try {
-          const stat = fs.statSync(path.join(BRAIN_DIR, e.name));
-          if (now - stat.birthtimeMs < 10_000) {
-            store.associateWorkspace(e.name, ws);
-            outputChannel.appendLine(`Associated ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
-          }
-        } catch { /* skip */ }
-      }
-    } catch { /* skip */ }
-  }
-
-  // Helper to refresh UI
   function refreshAll() {
-    associateNewDirs();
     webviewProvider.refresh();
   }
 
-  // Watch the brain directory for changes
+  // Watch the brain directory for UI refreshes (no auto-association)
   if (fs.existsSync(BRAIN_DIR)) {
     try {
-      const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => {
-        refreshAll();
-      });
+      const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => { refreshAll(); });
       context.subscriptions.push({ dispose: () => watcher.close() });
     } catch (err) {
       outputChannel.appendLine(`Warning: could not watch brain directory: ${err}`);
@@ -128,9 +91,17 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ---- Commands ----
 
-  // New conversation
+  // New conversation: create + associate with current workspace
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.newConversation', async () => {
+      // Snapshot before
+      const beforeIds = new Set<string>();
+      if (fs.existsSync(BRAIN_DIR)) {
+        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+          if (e.isDirectory() && UUID_RE.test(e.name)) { beforeIds.add(e.name); }
+        }
+      }
+
       try {
         await vscode.commands.executeCommand('antigravity.startNewConversation');
         outputChannel.appendLine('Started new conversation');
@@ -145,9 +116,67 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
       }
-      // Retry to catch the new dir (watcher may also catch it)
-      setTimeout(refreshAll, 500);
-      setTimeout(refreshAll, 2000);
+
+      // Detect and associate new dir (retry at multiple intervals)
+      const ws = getCurrentWorkspace();
+      const tryDetect = () => {
+        if (!ws || !fs.existsSync(BRAIN_DIR)) { return false; }
+        let found = false;
+        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+          if (e.isDirectory() && UUID_RE.test(e.name) && !beforeIds.has(e.name) && !store.getWorkspace(e.name)) {
+            store.associateWorkspace(e.name, ws);
+            outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
+            found = true;
+          }
+        }
+        refreshAll();
+        return found;
+      };
+      if (!tryDetect()) {
+        setTimeout(() => { if (!tryDetect()) { setTimeout(tryDetect, 2000); } }, 500);
+      }
+    }),
+  );
+
+  // Add existing conversation: QuickPick showing all unassociated conversations
+  context.subscriptions.push(
+    vscode.commands.registerCommand('conversationManager.addExisting', async () => {
+      const ws = getCurrentWorkspace();
+      if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
+
+      // Gather all conversation dirs not associated with this workspace
+      const candidates: { id: string; name: string; mtime: number }[] = [];
+      for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+        if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
+        const existingWs = store.getWorkspace(e.name);
+        if (existingWs === ws) { continue; } // already in this workspace
+        const dirPath = path.join(BRAIN_DIR, e.name);
+        const stat = fs.statSync(dirPath);
+        const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
+        candidates.push({ id: e.name, name, mtime: stat.mtimeMs });
+      }
+
+      // Sort by most recently modified
+      candidates.sort((a, b) => b.mtime - a.mtime);
+
+      const picks = candidates.map((c) => ({
+        label: c.name,
+        description: c.id.substring(0, 8),
+        detail: new Date(c.mtime).toLocaleString(),
+        id: c.id,
+      }));
+
+      const selected = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Select a conversation to add to this workspace...',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (selected) {
+        store.associateWorkspace(selected.id, ws);
+        outputChannel.appendLine(`Added ${selected.id.substring(0, 8)} (${selected.label}) to workspace`);
+        refreshAll();
+      }
     }),
   );
 
@@ -155,7 +184,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.openPicker', async () => {
       const allItems = webviewProvider.getConversations();
-
       const picks = allItems.map((c) => ({
         label: `${c.isPinned ? '$(pin) ' : ''}${c.displayName}`,
         description: c.id.slice(0, 8),
@@ -176,27 +204,17 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Switch to a specific conversation (accepts from webview or tree)
+  // Switch to conversation
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.switchTo', async (item?: { conversationId: string; displayName: string }) => {
-      if (!item) {
-        return;
-      }
-
+      if (!item) { return; }
       if (switchInProgress) {
         outputChannel.appendLine('  Switch ignored: another switch is in progress.');
         return;
       }
-
       switchInProgress = true;
-
       try {
         await switchToConversation(outputChannel, item.conversationId, item.displayName);
-        // Associate this conversation with current workspace on explicit switch
-        const ws = getCurrentWorkspace();
-        if (ws) {
-          store.associateWorkspace(item.conversationId, ws);
-        }
       } finally {
         switchInProgress = false;
       }
@@ -205,15 +223,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Refresh
   context.subscriptions.push(
-    vscode.commands.registerCommand('conversationManager.refresh', () => {
-      refreshAll();
-    }),
+    vscode.commands.registerCommand('conversationManager.refresh', () => { refreshAll(); }),
   );
 
-
-  // Cleanup
   context.subscriptions.push(outputChannel);
-
   outputChannel.appendLine('Conversation Manager activated!');
 }
 
