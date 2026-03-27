@@ -69,9 +69,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         case 'addExisting':
           vscode.commands.executeCommand('conversationManager.addExisting');
           break;
-        case 'refresh':
-          this.refresh();
-          break;
+
         case 'rename': {
           const currentName = this.store.getCustomName(message.id) || '';
           vscode.window.showInputBox({
@@ -394,20 +392,12 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
     <button onclick="send('addExisting')">+ Add</button>
-    <button id="refreshBtn" onclick="doRefresh()">Refresh</button>
   </div>
   ${cardsHtml}
   <script>
     const vscode = acquireVsCodeApi();
     function send(type) { vscode.postMessage({ type }); }
-    function doRefresh() {
-      const btn = document.getElementById('refreshBtn');
-      btn.textContent = 'Refreshing...';
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      send('refresh');
-      setTimeout(() => { btn.textContent = 'Refresh'; btn.disabled = false; btn.style.opacity = '1'; }, 1500);
-    }
+
     document.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (e.target.closest('.action-btn')) { return; }

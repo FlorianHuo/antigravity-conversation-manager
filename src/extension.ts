@@ -259,10 +259,6 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Refresh
-  context.subscriptions.push(
-    vscode.commands.registerCommand('conversationManager.refresh', () => { refreshAll(); }),
-  );
 
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine('Conversation Manager activated!');
