@@ -143,6 +143,24 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     return this.generateAutoName(id, dirPath);
   }
 
+  // Public: check if conversation artifacts reference the current workspace
+  public isContentMatchForWorkspace(dirPath: string): boolean {
+    if (!this.workspaceFilter) { return false; }
+    const workspaceName = path.basename(this.workspaceFilter);
+    for (const file of ['task.md', 'implementation_plan.md', 'walkthrough.md']) {
+      const filePath = path.join(dirPath, file);
+      if (fs.existsSync(filePath)) {
+        try {
+          const content = fs.readFileSync(filePath, 'utf-8');
+          if (content.includes(this.workspaceFilter!) || content.includes(workspaceName)) {
+            return true;
+          }
+        } catch { /* skip */ }
+      }
+    }
+    return false;
+  }
+
   private loadSummariesAsync(): Promise<void> {
     return new Promise((resolve) => {
       try {
@@ -193,6 +211,23 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         if (a.order !== b.order) { return a.order - b.order; }
         return b.lastModified - a.lastModified;
       });
+
+      // Auto-assign orders to content-matched conversations (default 999999)
+      // so that Up/Down reordering has distinct values to swap
+      if (conversations.some((c) => c.order === 999999)) {
+        let maxOrder = 0;
+        for (const c of conversations) {
+          if (c.order !== 999999 && c.order > maxOrder) { maxOrder = c.order; }
+        }
+        for (const c of conversations) {
+          if (c.order === 999999) {
+            maxOrder++;
+            this.store.setOrder(c.id, maxOrder);
+            c.order = maxOrder;
+          }
+        }
+      }
+
       return conversations;
     } catch {
       return [];
@@ -420,27 +455,14 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     if (!this.workspaceFilter) { return true; }
     if (this.store.isPinned(id)) { return true; }
 
-    // Check stored workspace association
+    // Check stored workspace association ('' means explicitly removed)
     const storedWorkspace = this.store.getWorkspace(id);
-    if (storedWorkspace) {
+    if (storedWorkspace !== undefined) {
       return storedWorkspace === this.workspaceFilter;
     }
 
     // Fallback: check file content for workspace name
-    const workspaceName = path.basename(this.workspaceFilter);
-    for (const file of ['task.md', 'implementation_plan.md', 'walkthrough.md']) {
-      const filePath = path.join(dirPath, file);
-      if (fs.existsSync(filePath)) {
-        try {
-          const content = fs.readFileSync(filePath, 'utf-8');
-          if (content.includes(this.workspaceFilter!) || content.includes(workspaceName)) {
-            return true;
-          }
-        } catch { /* skip */ }
-      }
-    }
-
-    return false;
+    return this.isContentMatchForWorkspace(dirPath);
   }
 
   private generateAutoName(id: string, dirPath: string): string {

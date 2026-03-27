@@ -130,13 +130,11 @@ export class ConversationStore {
   }
 
   removeWorkspace(id: string): void {
-    const meta = this.data.get(id);
-    if (meta) {
-      delete meta.workspace;
-      delete meta.order;
-      this.data.set(id, meta);
-      this.save();
-    }
+    const meta = this.getOrCreate(id);
+    meta.workspace = '';  // Explicitly removed (distinct from undefined = unset)
+    delete meta.order;
+    this.data.set(id, meta);
+    this.save();
   }
 
   getWorkspace(id: string): string | undefined {

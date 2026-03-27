@@ -144,13 +144,15 @@ export function activate(context: vscode.ExtensionContext) {
       const ws = getCurrentWorkspace();
       if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
 
-      // Gather all conversation dirs not associated with this workspace
+      // Gather conversation dirs relevant to this workspace but not yet in sidebar
+      const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
       const candidates: { id: string; name: string; mtime: number }[] = [];
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
-        const existingWs = store.getWorkspace(e.name);
-        if (existingWs === ws) { continue; } // already in this workspace
+        if (currentIds.has(e.name)) { continue; } // already in sidebar
         const dirPath = path.join(BRAIN_DIR, e.name);
+        // Only show conversations whose artifacts reference this workspace
+        if (!webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
         const stat = fs.statSync(dirPath);
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
         candidates.push({ id: e.name, name, mtime: stat.mtimeMs });
