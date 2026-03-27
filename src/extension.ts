@@ -178,43 +178,40 @@ export function activate(context: vscode.ExtensionContext) {
       const ws = getCurrentWorkspace();
       if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
 
-      // Gather conversation dirs for this workspace that aren't in sidebar
+      // Auto-detect: find the most recently active conversation not in sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
-      const candidates: { id: string; name: string; mtime: number }[] = [];
+      let bestId = '';
+      let bestMtime = 0;
+
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
-        if (currentIds.has(e.name)) { continue; } // already in sidebar
+        if (currentIds.has(e.name)) { continue; }
         const dirPath = path.join(BRAIN_DIR, e.name);
-        const existingWs = store.getWorkspace(e.name);
-        if (existingWs === ws) { continue; } // already associated (should be in sidebar)
-        // Removed conversations (workspace=''): always show for re-add
-        // Other-workspace or orphan: require content match
-        if (existingWs !== '' && !webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
-        const stat = fs.statSync(dirPath);
-        const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
-        candidates.push({ id: e.name, name, mtime: stat.mtimeMs });
+        // Find latest file modification inside the dir
+        let latestMtime = 0;
+        try {
+          for (const f of fs.readdirSync(dirPath)) {
+            try {
+              const fstat = fs.statSync(path.join(dirPath, f));
+              if (fstat.isFile() && fstat.mtimeMs > latestMtime) { latestMtime = fstat.mtimeMs; }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+        if (latestMtime > bestMtime) {
+          bestMtime = latestMtime;
+          bestId = e.name;
+        }
       }
 
-      // Sort by most recently modified
-      candidates.sort((a, b) => b.mtime - a.mtime);
-
-      const picks = candidates.map((c) => ({
-        label: c.name,
-        description: c.id.substring(0, 8),
-        detail: new Date(c.mtime).toLocaleString(),
-        id: c.id,
-      }));
-
-      const selected = await vscode.window.showQuickPick(picks, {
-        placeHolder: 'Select a conversation to add to this workspace...',
-        matchOnDescription: true,
-        matchOnDetail: true,
-      });
-
-      if (selected) {
-        store.associateWorkspace(selected.id, ws);
-        outputChannel.appendLine(`Added ${selected.id.substring(0, 8)} (${selected.label}) to workspace`);
+      if (bestId) {
+        const dirPath = path.join(BRAIN_DIR, bestId);
+        const name = webviewProvider.generateAutoNamePublic(bestId, dirPath);
+        store.associateWorkspace(bestId, ws);
+        outputChannel.appendLine(`Added current conversation ${bestId.substring(0, 8)} (${name})`);
         refreshAll();
+        vscode.window.showInformationMessage(`Added: ${name}`);
+      } else {
+        vscode.window.showInformationMessage('All conversations are already in the sidebar.');
       }
     }),
   );

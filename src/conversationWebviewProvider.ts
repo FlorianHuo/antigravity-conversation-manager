@@ -203,8 +203,17 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           continue;
         }
 
-        const stat = fs.statSync(dirPath);
-        const lastModified = stat.mtimeMs;
+        // Last activity: find most recently modified file in the dir
+        let lastModified = 0;
+        try {
+          for (const f of fs.readdirSync(dirPath)) {
+            try {
+              const fstat = fs.statSync(path.join(dirPath, f));
+              if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+        if (lastModified === 0) { lastModified = fs.statSync(dirPath).mtimeMs; }
         const customName = this.store.getCustomName(id);
         const displayName = customName || this.generateAutoName(id, dirPath);
         const summary = this.cachedSummaries[id] || this.getLatestSummary(dirPath);
