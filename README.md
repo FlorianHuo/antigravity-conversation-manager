@@ -4,13 +4,14 @@ Manage multiple AI conversations from the Antigravity sidebar.
 
 ## Features
 
-- **Sidebar TreeView** with all conversations, sorted by recency
-- **Pinned conversations** section for quick access
-- **Auto-naming** from task.md / implementation_plan.md titles
-- **Custom renaming** via right-click menu
-- **New conversation** button ("+") in the sidebar header
-- **Quick switch** by clicking any conversation
-- **Delete** conversations with confirmation
+- **Sidebar cards** with drag-and-drop reordering
+- **+ New** creates a conversation and auto-associates with current workspace
+- **+ Add** auto-detects current active conversation and adds to sidebar
+- **Auto-naming** from task.md / implementation_plan.md / metadata titles
+- **Custom renaming** via pencil icon on hover
+- **Remove / Delete** -- hide from sidebar or permanently delete
+- **Quick switch** by clicking any card
+- **Last activity time** on each card
 - **File watcher** auto-refreshes when conversations change
 
 ## Keybindings
@@ -43,6 +44,16 @@ This injects the `antigravity.switchConversation` command and suppresses the int
 To restore original files: `python scripts/patch_workbench.py --restore`
 
 ## Changelog
+
+### v0.2.0
+
+- **Drag-and-drop** card reordering (replaces up/down arrows)
+- **+ Add** auto-detects current conversation (no more QuickPick)
+- **+ New** watcher-based detection (60s window for late brain-dir creation)
+- **Last activity time** on cards (scans file mtimes, not dir mtime)
+- **Remove** works reliably (explicit `workspace=''` marker)
+- **Workspace filtering** via content-match (scans all text files in brain dir)
+- Removed Refresh button (fs.watch handles auto-refresh)
 
 ### v0.1.0
 

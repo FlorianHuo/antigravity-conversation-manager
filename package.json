@@ -2,7 +2,7 @@
   "name": "antigravity-conversation-manager",
   "displayName": "Conversation Manager",
   "description": "Manage multiple AI conversations with tabs in the Antigravity sidebar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "florian",
   "engines": {
     "vscode": "^1.85.0"
