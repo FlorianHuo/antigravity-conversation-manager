@@ -187,6 +187,8 @@ export function activate(context: vscode.ExtensionContext) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; }
         const dirPath = path.join(BRAIN_DIR, e.name);
+        // Only consider conversations relevant to this workspace
+        if (!webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
         // Find latest file modification inside the dir
         let latestMtime = 0;
         try {
