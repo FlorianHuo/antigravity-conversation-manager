@@ -57,6 +57,10 @@ async function switchToConversation(
 
 let switchInProgress = false;
 
+// Pending new conversation state: watcher will auto-associate when brain dir appears
+let pendingNewBeforeIds: Set<string> | null = null;
+let pendingNewWorkspace: string | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Conversation Manager');
   outputChannel.appendLine('Conversation Manager activating...');
@@ -79,10 +83,28 @@ export function activate(context: vscode.ExtensionContext) {
     webviewProvider.refresh();
   }
 
-  // Watch the brain directory for UI refreshes (no auto-association)
+  // Watch the brain directory for UI refreshes + pending new conversation detection
   if (fs.existsSync(BRAIN_DIR)) {
     try {
-      const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => { refreshAll(); });
+      const watcher = fs.watch(BRAIN_DIR, { persistent: false }, () => {
+        // Auto-associate pending new conversation when its brain dir appears
+        if (pendingNewBeforeIds && pendingNewWorkspace) {
+          try {
+            for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+              if (e.isDirectory() && UUID_RE.test(e.name)
+                  && !pendingNewBeforeIds.has(e.name)
+                  && !store.getWorkspace(e.name)) {
+                store.associateWorkspace(e.name, pendingNewWorkspace);
+                outputChannel.appendLine(`[watcher] Associated new ${e.name.substring(0, 8)}`);
+                pendingNewBeforeIds = null;
+                pendingNewWorkspace = null;
+                break;
+              }
+            }
+          } catch { /* skip */ }
+        }
+        refreshAll();
+      });
       context.subscriptions.push({ dispose: () => watcher.close() });
     } catch (err) {
       outputChannel.appendLine(`Warning: could not watch brain directory: ${err}`);
@@ -117,23 +139,35 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      // Detect and associate new dir (retry at multiple intervals)
+      // Detect and associate new dir (immediate + watcher-based)
       const ws = getCurrentWorkspace();
-      const tryDetect = () => {
-        if (!ws || !fs.existsSync(BRAIN_DIR)) { return false; }
-        let found = false;
-        for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
-          if (e.isDirectory() && UUID_RE.test(e.name) && !beforeIds.has(e.name) && !store.getWorkspace(e.name)) {
-            store.associateWorkspace(e.name, ws);
-            outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
-            found = true;
+      if (ws && fs.existsSync(BRAIN_DIR)) {
+        // Set pending state so the fs.watch callback can detect it later
+        pendingNewBeforeIds = beforeIds;
+        pendingNewWorkspace = ws;
+        // Clear pending after 60s to avoid stale state
+        setTimeout(() => { pendingNewBeforeIds = null; pendingNewWorkspace = null; }, 60000);
+
+        // Also try immediate + short retries
+        const tryDetect = () => {
+          if (!pendingNewBeforeIds) { return true; } // already found by watcher
+          for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+            if (e.isDirectory() && UUID_RE.test(e.name)
+                && !beforeIds.has(e.name) && !store.getWorkspace(e.name)) {
+              store.associateWorkspace(e.name, ws);
+              outputChannel.appendLine(`Associated new ${e.name.substring(0, 8)} with ${path.basename(ws)}`);
+              pendingNewBeforeIds = null;
+              pendingNewWorkspace = null;
+              refreshAll();
+              return true;
+            }
           }
+          refreshAll();
+          return false;
+        };
+        if (!tryDetect()) {
+          setTimeout(() => { if (!tryDetect()) { setTimeout(tryDetect, 2000); } }, 500);
         }
-        refreshAll();
-        return found;
-      };
-      if (!tryDetect()) {
-        setTimeout(() => { if (!tryDetect()) { setTimeout(tryDetect, 2000); } }, 500);
       }
     }),
   );
@@ -144,15 +178,16 @@ export function activate(context: vscode.ExtensionContext) {
       const ws = getCurrentWorkspace();
       if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
 
-      // Gather conversation dirs relevant to this workspace but not yet in sidebar
+      // Gather conversation dirs not in sidebar, excluding other-workspace conversations
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
       const candidates: { id: string; name: string; mtime: number }[] = [];
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; } // already in sidebar
+        const existingWs = store.getWorkspace(e.name);
+        // Skip conversations explicitly associated with a DIFFERENT workspace
+        if (existingWs && existingWs !== ws) { continue; }
         const dirPath = path.join(BRAIN_DIR, e.name);
-        // Only show conversations whose artifacts reference this workspace
-        if (!webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
         const stat = fs.statSync(dirPath);
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
         candidates.push({ id: e.name, name, mtime: stat.mtimeMs });
