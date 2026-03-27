@@ -147,17 +147,24 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   public isContentMatchForWorkspace(dirPath: string): boolean {
     if (!this.workspaceFilter) { return false; }
     const workspaceName = path.basename(this.workspaceFilter);
-    for (const file of ['task.md', 'implementation_plan.md', 'walkthrough.md']) {
-      const filePath = path.join(dirPath, file);
-      if (fs.existsSync(filePath)) {
+    try {
+      const files = fs.readdirSync(dirPath);
+      for (const file of files) {
+        // Scan all text-based files: .md, .resolved, .txt, .json
+        if (!file.endsWith('.md') && !file.endsWith('.txt')
+            && !file.endsWith('.json') && !file.includes('.resolved')) { continue; }
+        if (file.startsWith('media__')) { continue; }
+        const filePath = path.join(dirPath, file);
         try {
+          const stat = fs.statSync(filePath);
+          if (!stat.isFile() || stat.size > 200000) { continue; }
           const content = fs.readFileSync(filePath, 'utf-8');
           if (content.includes(this.workspaceFilter!) || content.includes(workspaceName)) {
             return true;
           }
         } catch { /* skip */ }
       }
-    }
+    } catch { /* skip */ }
     return false;
   }
 

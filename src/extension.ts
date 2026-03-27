@@ -178,16 +178,18 @@ export function activate(context: vscode.ExtensionContext) {
       const ws = getCurrentWorkspace();
       if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
 
-      // Gather conversation dirs not in sidebar, excluding other-workspace conversations
+      // Gather conversation dirs for this workspace that aren't in sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
       const candidates: { id: string; name: string; mtime: number }[] = [];
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; } // already in sidebar
-        const existingWs = store.getWorkspace(e.name);
-        // Skip conversations explicitly associated with a DIFFERENT workspace
-        if (existingWs && existingWs !== ws) { continue; }
         const dirPath = path.join(BRAIN_DIR, e.name);
+        const existingWs = store.getWorkspace(e.name);
+        if (existingWs === ws) { continue; } // already associated (should be in sidebar)
+        // Removed conversations (workspace=''): always show for re-add
+        // Other-workspace or orphan: require content match
+        if (existingWs !== '' && !webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
         const stat = fs.statSync(dirPath);
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
         candidates.push({ id: e.name, name, mtime: stat.mtimeMs });
