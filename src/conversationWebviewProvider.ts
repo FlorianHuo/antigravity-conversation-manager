@@ -124,6 +124,22 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'reorder': {
+          // Drag-and-drop reorder: insert message.fromId before message.beforeId
+          const conversations = this.getConversations();
+          const ids = conversations.map((c) => c.id);
+          const fromIdx = ids.indexOf(message.fromId);
+          if (fromIdx < 0) { break; }
+          // Remove from current position
+          ids.splice(fromIdx, 1);
+          // Insert before target (or at end)
+          const toIdx = message.beforeId ? ids.indexOf(message.beforeId) : ids.length;
+          ids.splice(toIdx < 0 ? ids.length : toIdx, 0, message.fromId);
+          // Re-assign sequential orders
+          ids.forEach((id, i) => { this.store.setOrder(id, i); });
+          this.updateContent();
+          break;
+        }
       }
     });
 
@@ -263,13 +279,12 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
       const pinIcon = c.isPinned ? '<span class="pin-icon">&#128204;</span>' : '';
 
       return `
-        <div class="card" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}">
+        <div class="card" draggable="true" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}">
           <div class="card-header">
+            <span class="drag-handle" title="Drag to reorder">&#9776;</span>
             ${pinIcon}
             <span class="card-title">${this.escapeHtml(c.displayName)}</span>
             <span class="card-actions">
-              ${idx > 0 ? `<span class="action-btn move-btn" data-id="${c.id}" data-dir="up" title="Move up">&uarr;</span>` : ''}
-              ${idx < total - 1 ? `<span class="action-btn move-btn" data-id="${c.id}" data-dir="down" title="Move down">&darr;</span>` : ''}
               <span class="action-btn rename-btn" data-id="${c.id}" title="Rename">&#9998;</span>
               <span class="action-btn remove-btn" data-id="${c.id}" title="Remove from sidebar">&times;</span>
               <span class="action-btn delete-btn" data-id="${c.id}" data-name="${this.escapeHtml(c.displayName)}" title="Delete permanently">&#128465;</span>
@@ -365,6 +380,18 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     .card:hover .action-btn { opacity: 0.5; }
     .action-btn:hover { opacity: 1 !important; }
     .remove-btn { font-size: 16px; font-weight: bold; }
+    .drag-handle {
+      cursor: grab;
+      opacity: 0.3;
+      font-size: 12px;
+      flex-shrink: 0;
+      user-select: none;
+      transition: opacity 0.1s;
+    }
+    .card:hover .drag-handle { opacity: 0.7; }
+    .drag-handle:hover { opacity: 1 !important; }
+    .card.dragging { opacity: 0.4; }
+    .card.drag-over { border-top: 2px solid var(--vscode-focusBorder); margin-top: -2px; }
     .card-summary {
       font-size: 12px;
       color: var(--vscode-descriptionForeground);
@@ -422,10 +449,34 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         vscode.postMessage({ type: 'delete', id: btn.dataset.id, name: btn.dataset.name });
       });
     });
-    document.querySelectorAll('.move-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        vscode.postMessage({ type: btn.dataset.dir === 'up' ? 'moveUp' : 'moveDown', id: btn.dataset.id });
+    // Drag and drop reordering
+    let dragId = null;
+    document.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('dragstart', (e) => {
+        dragId = card.dataset.id;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        dragId = null;
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (card.dataset.id !== dragId) {
+          document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+          card.classList.add('drag-over');
+        }
+      });
+      card.addEventListener('dragleave', () => { card.classList.remove('drag-over'); });
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if (dragId && card.dataset.id !== dragId) {
+          vscode.postMessage({ type: 'reorder', fromId: dragId, beforeId: card.dataset.id });
+        }
       });
     });
   </script>
