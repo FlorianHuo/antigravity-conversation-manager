@@ -163,6 +163,15 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
 
   public isConversationEmptyPublic(dirPath: string): boolean {
     try {
+      // If there are any recorded messages, it is NOT an empty conversation
+      const msgPath = path.join(dirPath, '.system_generated', 'messages');
+      if (fs.existsSync(msgPath)) {
+        const msgs = fs.readdirSync(msgPath).filter(f => f.endsWith('.json'));
+        if (msgs.length > 0) {
+          return false; // It has chat history
+        }
+      }
+
       const files = fs.readdirSync(dirPath);
       // It's considered empty if it only contains the system folder or nothing
       const nonSystemFiles = files.filter(f => f !== '.system_generated');
