@@ -69,6 +69,9 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         case 'addExisting':
           vscode.commands.executeCommand('conversationManager.addExisting');
           break;
+        case 'refresh':
+          this.loadSummariesAsync().then(() => { this.refresh(); });
+          break;
 
         case 'rename': {
           const currentName = this.store.getCustomName(message.id) || '';
@@ -185,22 +188,33 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   public isContentMatchForWorkspace(dirPath: string): boolean {
     if (!this.workspaceFilter) { return false; }
     const workspaceName = path.basename(this.workspaceFilter);
+    // Use word-boundary regex for basename to avoid substring false positives
+    // e.g. "antigravity-conversation-manager" should not match "conversation-manager"
+    const basenameRe = new RegExp(`(^|[\\s/\\\\])${workspaceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s/\\\\]|$)`);
+    const check = (filePath: string): boolean => {
+      try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size > 200000) { return false; }
+        const content = fs.readFileSync(filePath, 'utf-8');
+        return content.includes(this.workspaceFilter!) || basenameRe.test(content);
+      } catch { return false; }
+    };
     try {
-      const files = fs.readdirSync(dirPath);
-      for (const file of files) {
-        // Scan all text-based files: .md, .resolved, .txt, .json
+      // Scan top-level text files
+      for (const file of fs.readdirSync(dirPath)) {
         if (!file.endsWith('.md') && !file.endsWith('.txt')
             && !file.endsWith('.json') && !file.includes('.resolved')) { continue; }
         if (file.startsWith('media__')) { continue; }
-        const filePath = path.join(dirPath, file);
-        try {
-          const stat = fs.statSync(filePath);
-          if (!stat.isFile() || stat.size > 200000) { continue; }
-          const content = fs.readFileSync(filePath, 'utf-8');
-          if (content.includes(this.workspaceFilter!) || content.includes(workspaceName)) {
-            return true;
+        if (check(path.join(dirPath, file))) { return true; }
+      }
+      // Scan .system_generated directory (context files, txt)
+      const sysDir = path.join(dirPath, '.system_generated');
+      if (fs.existsSync(sysDir)) {
+        for (const file of fs.readdirSync(sysDir)) {
+          if (file.endsWith('.txt') || file.endsWith('.json')) {
+            if (check(path.join(sysDir, file))) { return true; }
           }
-        } catch { /* skip */ }
+        }
       }
     } catch { /* skip */ }
     return false;
@@ -455,6 +469,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
   <div class="toolbar">
     <button onclick="send('newConversation')">+ New</button>
     <button onclick="send('addExisting')">+ Add</button>
+    <button onclick="send('refresh')" title="Refresh">&#8635;</button>
   </div>
   ${cardsHtml}
   <script>
@@ -610,12 +625,6 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
         if (line.length > 60) { return line.substring(0, 57) + '...'; }
       } catch { /* skip */ }
     }
-
-    // Fallback
-    try {
-      const files = fs.readdirSync(dirPath);
-      if (files.length === 0) { return 'New Conversation'; }
-    } catch { /* skip */ }
 
     return id.substring(0, 8);
   }

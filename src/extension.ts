@@ -181,24 +181,51 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Find all conversations not currently in the sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
-      const matchedCandidates: { id: string, name: string, summary: string, mtime: number }[] = [];
-      const recentUnmatchedCandidates: { id: string, name: string, summary: string, mtime: number }[] = [];
+      const candidates: { id: string, name: string, summary: string, mtime: number, isMatch: boolean, sizeLabel: string }[] = [];
 
-      const THIRTY_MINS_MS = 30 * 60 * 1000;
-      const now = Date.now();
+      const getConversationSize = (dirPath: string): string => {
+        let msgs = 0;
+        let artifacts = 0;
+        try {
+          const msgPath = path.join(dirPath, '.system_generated', 'messages');
+          if (fs.existsSync(msgPath)) {
+            msgs = fs.readdirSync(msgPath).filter(f => f.endsWith('.json')).length;
+          }
+          artifacts = fs.readdirSync(dirPath).filter(f =>
+            !f.startsWith('.') && !f.startsWith('media__')).length;
+        } catch { /* skip */ }
+        const parts: string[] = [];
+        if (msgs > 0) { parts.push(`${msgs} msg${msgs > 1 ? 's' : ''}`); }
+        if (artifacts > 0) { parts.push(`${artifacts} file${artifacts > 1 ? 's' : ''}`); }
+        return parts.length > 0 ? parts.join(', ') : '1 item';
+      };
+
+      const formatTime = (ms: number): string => {
+        const diff = Date.now() - ms;
+        const min = Math.floor(diff / 60000);
+        if (min < 60) { return `${min}m ago`; }
+        const hr = Math.floor(min / 60);
+        if (hr < 24) { return `${hr}h ago`; }
+        const day = Math.floor(hr / 24);
+        if (day < 30) { return `${day}d ago`; }
+        return new Date(ms).toLocaleDateString();
+      };
 
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; }
-        
-        // Filter: STRICTLY exclude conversations already claimed by another workspace
+
+        // Exclude conversations explicitly removed or claimed by another workspace
         const existingWorkspace = store.getWorkspace(e.name);
-        if (existingWorkspace && existingWorkspace !== ws) {
+        if (existingWorkspace !== undefined && existingWorkspace !== ws) {
           continue;
         }
 
         const dirPath = path.join(BRAIN_DIR, e.name);
-        
+
+        // Skip empty conversations (no artifacts, no messages)
+        if (webviewProvider.isConversationEmptyPublic(dirPath)) { continue; }
+
         let latestMtime = fs.statSync(dirPath).mtimeMs;
         try {
           for (const f of fs.readdirSync(dirPath)) {
@@ -221,55 +248,34 @@ export function activate(context: vscode.ExtensionContext) {
         } catch { /* skip */ }
 
         const isMatch = webviewProvider.isContentMatchForWorkspace(dirPath);
-
-        // If it doesn't match and was modified over 30 mins ago, it's old unassociated garbage. Skip.
-        if (!isMatch && (now - latestMtime > THIRTY_MINS_MS)) {
-           continue; 
-        }
-
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
         const lastPrompt = getLastUserPrompt(dirPath);
         const dbSummary = webviewProvider.getConversationSummaryPublic(e.name, dirPath);
-        
-        // Ensure detail strings are always clean and present
-        let summary = lastPrompt ? `(Prompt): ${lastPrompt}` : (dbSummary ? dbSummary : 'No explicit summary found.');
-        
-        if (isMatch) {
-          matchedCandidates.push({ id: e.name, name, summary, mtime: latestMtime });
-        } else {
-          recentUnmatchedCandidates.push({ id: e.name, name, summary, mtime: latestMtime });
-        }
+        const summary = lastPrompt ? `Prompt: ${lastPrompt}` : (dbSummary || '');
+
+        const sizeLabel = getConversationSize(dirPath);
+        candidates.push({ id: e.name, name, summary, mtime: latestMtime, isMatch, sizeLabel });
       }
 
-      if (matchedCandidates.length === 0 && recentUnmatchedCandidates.length === 0) {
-        vscode.window.showInformationMessage('All valid or recent conversations are already in the sidebar.');
+      if (candidates.length === 0) {
+        vscode.window.showInformationMessage('No conversations available to add.');
         return;
       }
 
-      // Sort newest first
-      matchedCandidates.sort((a, b) => b.mtime - a.mtime);
-      recentUnmatchedCandidates.sort((a, b) => b.mtime - a.mtime);
+      // Sort: workspace matches first, then by recency
+      candidates.sort((a, b) => {
+        if (a.isMatch !== b.isMatch) { return a.isMatch ? -1 : 1; }
+        return b.mtime - a.mtime;
+      });
 
-      const picks: vscode.QuickPickItem[] = [];
-
-      matchedCandidates.forEach(c => picks.push({
-        label: `$(check) ${c.name}`,
-        description: `Matched Workspace | ${c.id.substring(0, 8)}`,
-        detail: c.summary,
+      const picks: vscode.QuickPickItem[] = candidates.slice(0, 30).map(c => ({
+        label: `${c.isMatch ? '$(check) ' : ''}${c.name}`,
+        description: `${formatTime(c.mtime)}  ·  ${c.sizeLabel}  ${c.id.substring(0, 8)}`,
+        detail: c.summary || undefined,
         // @ts-ignore
         conversationId: c.id
       }));
 
-      // Limit to top 5 so we don't spam the user
-      recentUnmatchedCandidates.slice(0, 5).forEach(c => picks.push({
-        label: `$(clock) ${c.name}`,
-        description: `Recent (Unmatched) | ${c.id.substring(0, 8)}`,
-        detail: c.summary,
-        // @ts-ignore
-        conversationId: c.id
-      }));
-      
-      // If they just clicked "+ Add", give them a choice
       const selected = await vscode.window.showQuickPick(picks, {
         placeHolder: 'Select a conversation to add to this workspace',
         matchOnDescription: true,
