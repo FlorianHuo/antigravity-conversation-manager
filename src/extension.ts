@@ -180,13 +180,19 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Find all conversations not currently in the sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
-      const candidates: { id: string, name: string, mtime: number }[] = [];
+      const candidates: { id: string, name: string, summary: string | undefined, mtime: number }[] = [];
 
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; }
         
         const dirPath = path.join(BRAIN_DIR, e.name);
+
+        // Filter: Keep only conversations from this workspace OR brand new empty ones
+        const isMatch = webviewProvider.isContentMatchForWorkspace(dirPath);
+        const isEmpty = webviewProvider.isConversationEmptyPublic(dirPath);
+        if (!isMatch && !isEmpty) { continue; }
+
         let latestMtime = fs.statSync(dirPath).mtimeMs;
         try {
           for (const f of fs.readdirSync(dirPath)) {
@@ -209,11 +215,12 @@ export function activate(context: vscode.ExtensionContext) {
         } catch { /* skip */ }
         
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
-        candidates.push({ id: e.name, name, mtime: latestMtime });
+        const summary = webviewProvider.getConversationSummaryPublic(e.name, dirPath);
+        candidates.push({ id: e.name, name, summary, mtime: latestMtime });
       }
 
       if (candidates.length === 0) {
-        vscode.window.showInformationMessage('All local conversations are already in the sidebar.');
+        vscode.window.showInformationMessage('All valid conversations for this workspace are already in the sidebar.');
         return;
       }
 
@@ -223,12 +230,15 @@ export function activate(context: vscode.ExtensionContext) {
       const picks = candidates.map(c => ({
         label: c.name,
         description: c.id.substring(0, 8),
+        detail: c.summary,
         conversationId: c.id
       }));
 
       // If they just clicked "+ Add", give them a choice
       const selected = await vscode.window.showQuickPick(picks, {
-        placeHolder: 'Select a conversation to add to this workspace'
+        placeHolder: 'Select a conversation to add to this workspace',
+        matchOnDescription: true,
+        matchOnDetail: true
       });
 
       if (selected) {

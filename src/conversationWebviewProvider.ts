@@ -157,6 +157,21 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
     return this.generateAutoName(id, dirPath);
   }
 
+  public getConversationSummaryPublic(id: string, dirPath: string): string | undefined {
+    return this.cachedSummaries[id] || this.getLatestSummary(dirPath);
+  }
+
+  public isConversationEmptyPublic(dirPath: string): boolean {
+    try {
+      const files = fs.readdirSync(dirPath);
+      // It's considered empty if it only contains the system folder or nothing
+      const nonSystemFiles = files.filter(f => f !== '.system_generated');
+      return nonSystemFiles.length === 0;
+    } catch {
+      return true; // Errors out -> assume empty/unusable
+    }
+  }
+
   // Public: check if conversation artifacts reference the current workspace
   public isContentMatchForWorkspace(dirPath: string): boolean {
     if (!this.workspaceFilter) { return false; }
