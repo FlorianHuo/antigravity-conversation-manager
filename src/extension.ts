@@ -181,17 +181,15 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Find all conversations not currently in the sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
-      const matchedCandidates: { id: string, name: string, summary: string | undefined, mtime: number }[] = [];
-      const recentUnmatchedCandidates: { id: string, name: string, summary: string | undefined, mtime: number }[] = [];
+      const matchedCandidates: { id: string, name: string, summary: string, mtime: number }[] = [];
+      const recentUnmatchedCandidates: { id: string, name: string, summary: string, mtime: number }[] = [];
 
-      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      const THIRTY_MINS_MS = 30 * 60 * 1000;
       const now = Date.now();
 
       for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; }
-        
-        const dirPath = path.join(BRAIN_DIR, e.name);
         
         // Filter: STRICTLY exclude conversations already claimed by another workspace
         const existingWorkspace = store.getWorkspace(e.name);
@@ -199,6 +197,8 @@ export function activate(context: vscode.ExtensionContext) {
           continue;
         }
 
+        const dirPath = path.join(BRAIN_DIR, e.name);
+        
         let latestMtime = fs.statSync(dirPath).mtimeMs;
         try {
           for (const f of fs.readdirSync(dirPath)) {
@@ -220,23 +220,29 @@ export function activate(context: vscode.ExtensionContext) {
           }
         } catch { /* skip */ }
 
+        const isMatch = webviewProvider.isContentMatchForWorkspace(dirPath);
+
+        // If it doesn't match and was modified over 30 mins ago, it's old unassociated garbage. Skip.
+        if (!isMatch && (now - latestMtime > THIRTY_MINS_MS)) {
+           continue; 
+        }
+
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
         const lastPrompt = getLastUserPrompt(dirPath);
         const dbSummary = webviewProvider.getConversationSummaryPublic(e.name, dirPath);
-        const summary = lastPrompt ? `Prompt: ${lastPrompt}` : dbSummary;
-
-        const isMatch = webviewProvider.isContentMatchForWorkspace(dirPath);
+        
+        // Ensure detail strings are always clean and present
+        let summary = lastPrompt ? `(Prompt): ${lastPrompt}` : (dbSummary ? dbSummary : 'No explicit summary found.');
         
         if (isMatch) {
           matchedCandidates.push({ id: e.name, name, summary, mtime: latestMtime });
-        } else if (now - latestMtime < ONE_DAY_MS) {
-          // If it doesn't match heuristically but is very recent, they MIGHT want it
+        } else {
           recentUnmatchedCandidates.push({ id: e.name, name, summary, mtime: latestMtime });
         }
       }
 
       if (matchedCandidates.length === 0 && recentUnmatchedCandidates.length === 0) {
-        vscode.window.showInformationMessage('All valid conversations for this workspace are already in the sidebar.');
+        vscode.window.showInformationMessage('All valid or recent conversations are already in the sidebar.');
         return;
       }
 
@@ -246,34 +252,22 @@ export function activate(context: vscode.ExtensionContext) {
 
       const picks: vscode.QuickPickItem[] = [];
 
-      if (matchedCandidates.length > 0) {
-        picks.push({
-          label: 'Matched Current Workspace',
-          kind: vscode.QuickPickItemKind.Separator
-        });
-        matchedCandidates.forEach(c => picks.push({
-          label: c.name,
-          description: c.id.substring(0, 8),
-          detail: c.summary,
-          // @ts-ignore
-          conversationId: c.id
-        }));
-      }
+      matchedCandidates.forEach(c => picks.push({
+        label: `$(check) ${c.name}`,
+        description: `Matched Workspace | ${c.id.substring(0, 8)}`,
+        detail: c.summary,
+        // @ts-ignore
+        conversationId: c.id
+      }));
 
-      if (recentUnmatchedCandidates.length > 0) {
-        picks.push({
-          label: 'Recent Uncategorized (Last 24h)',
-          kind: vscode.QuickPickItemKind.Separator
-        });
-        // Limit to top 5 so we don't spam the user with random workspaces
-        recentUnmatchedCandidates.slice(0, 5).forEach(c => picks.push({
-          label: c.name,
-          description: c.id.substring(0, 8),
-          detail: c.summary,
-          // @ts-ignore
-          conversationId: c.id
-        }));
-      }
+      // Limit to top 5 so we don't spam the user
+      recentUnmatchedCandidates.slice(0, 5).forEach(c => picks.push({
+        label: `$(clock) ${c.name}`,
+        description: `Recent (Unmatched) | ${c.id.substring(0, 8)}`,
+        detail: c.summary,
+        // @ts-ignore
+        conversationId: c.id
+      }));
       
       // If they just clicked "+ Add", give them a choice
       const selected = await vscode.window.showQuickPick(picks, {
