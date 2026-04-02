@@ -25,13 +25,13 @@ PRODUCT = '/Applications/Antigravity.app/Contents/Resources/app/product.json'
 CHECKSUM_KEY = 'vs/workbench/workbench.desktop.main.js'
 
 # Anchor: the end of the existing "open customizations tab" command
-ANCHOR = 't.get(RQ).togglePanelTab?.("customization")}});'
+ANCHOR = 't.get(jz).togglePanelTab?.("customization")}});'
 
 # Injected command: fires event first (setCascadeId), then openPanel after 50ms
 INJECTION = (
     'ge(class extends Ie{constructor(){super({id:"antigravity.switchConversation",'
     'title:"Switch Conversation",f1:!1})}async run(t,e){'
-    'var s=t.get(RQ);s.c.fire({tab:"conversation",cascadeId:e});'
+    'var s=t.get(jz);s.c.fire({tab:"conversation",cascadeId:e});'
     'setTimeout(function(){s.openPanel()},50)}});'
 )
 
