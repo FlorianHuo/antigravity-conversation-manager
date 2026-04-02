@@ -193,6 +193,12 @@ export function activate(context: vscode.ExtensionContext) {
         
         const dirPath = path.join(BRAIN_DIR, e.name);
         
+        // Filter: STRICTLY exclude conversations already claimed by another workspace
+        const existingWorkspace = store.getWorkspace(e.name);
+        if (existingWorkspace && existingWorkspace !== ws) {
+          continue;
+        }
+
         let latestMtime = fs.statSync(dirPath).mtimeMs;
         try {
           for (const f of fs.readdirSync(dirPath)) {
