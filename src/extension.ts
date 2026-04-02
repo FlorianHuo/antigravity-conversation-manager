@@ -172,52 +172,49 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Add current conversation: get the active conversation from Antigravity API
+  // Add existing conversation: QuickPick showing all unassociated conversations
   context.subscriptions.push(
     vscode.commands.registerCommand('conversationManager.addExisting', async () => {
       const ws = getCurrentWorkspace();
       if (!ws || !fs.existsSync(BRAIN_DIR)) { return; }
 
-      // Get current conversation ID from Antigravity's extension API
-      let conversationId = '';
-      try {
-        const antigravity = vscode.extensions.getExtension('google.antigravity');
-        if (antigravity?.isActive && antigravity.exports) {
-          const api = antigravity.exports;
-          if (typeof api.getCurrentConversation === 'function') {
-            const conv = api.getCurrentConversation();
-            conversationId = conv?.id || conv?.conversationId || '';
-            outputChannel.appendLine(`[addExisting] API returned: ${JSON.stringify(conv)}`);
-          } else if (typeof api.getConversationId === 'function') {
-            conversationId = api.getConversationId() || '';
-          }
-        }
-      } catch (err) {
-        outputChannel.appendLine(`[addExisting] API error: ${err}`);
-      }
-
-      if (!conversationId || !UUID_RE.test(conversationId)) {
-        outputChannel.appendLine(`[addExisting] Could not get current conversation ID (got: "${conversationId}")`);
-        vscode.window.showWarningMessage('Could not detect the current conversation. Antigravity API unavailable.');
-        return;
-      }
-
-      // Check if already in sidebar
+      // Auto-detect: find the most recently active conversation not in sidebar
       const currentIds = new Set(webviewProvider.getConversations().map((c) => c.id));
-      if (currentIds.has(conversationId)) {
-        vscode.window.showInformationMessage('This conversation is already in the sidebar.');
-        return;
+      let bestId = '';
+      let bestMtime = 0;
+
+      for (const e of fs.readdirSync(BRAIN_DIR, { withFileTypes: true })) {
+        if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
+        if (currentIds.has(e.name)) { continue; }
+        const dirPath = path.join(BRAIN_DIR, e.name);
+        // Only consider conversations relevant to this workspace
+        if (!webviewProvider.isContentMatchForWorkspace(dirPath)) { continue; }
+        // Find latest file modification inside the dir
+        let latestMtime = 0;
+        try {
+          for (const f of fs.readdirSync(dirPath)) {
+            try {
+              const fstat = fs.statSync(path.join(dirPath, f));
+              if (fstat.isFile() && fstat.mtimeMs > latestMtime) { latestMtime = fstat.mtimeMs; }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+        if (latestMtime > bestMtime) {
+          bestMtime = latestMtime;
+          bestId = e.name;
+        }
       }
 
-      // Associate with current workspace
-      const dirPath = path.join(BRAIN_DIR, conversationId);
-      const name = fs.existsSync(dirPath)
-        ? webviewProvider.generateAutoNamePublic(conversationId, dirPath)
-        : conversationId.substring(0, 8);
-      store.associateWorkspace(conversationId, ws);
-      outputChannel.appendLine(`Added current conversation ${conversationId.substring(0, 8)} (${name})`);
-      refreshAll();
-      vscode.window.showInformationMessage(`Added: ${name}`);
+      if (bestId) {
+        const dirPath = path.join(BRAIN_DIR, bestId);
+        const name = webviewProvider.generateAutoNamePublic(bestId, dirPath);
+        store.associateWorkspace(bestId, ws);
+        outputChannel.appendLine(`Added current conversation ${bestId.substring(0, 8)} (${name})`);
+        refreshAll();
+        vscode.window.showInformationMessage(`Added: ${name}`);
+      } else {
+        vscode.window.showInformationMessage('All conversations are already in the sidebar.');
+      }
     }),
   );
 
