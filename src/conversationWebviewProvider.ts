@@ -226,6 +226,18 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
               if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
             } catch { /* skip */ }
           }
+          // Also check internal messages folder
+          const msgPath = path.join(dirPath, '.system_generated', 'messages');
+          if (fs.existsSync(msgPath)) {
+            const msgStat = fs.statSync(msgPath);
+            if (msgStat.mtimeMs > lastModified) { lastModified = msgStat.mtimeMs; }
+            for (const f of fs.readdirSync(msgPath)) {
+              try {
+                const fstat = fs.statSync(path.join(msgPath, f));
+                if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
+              } catch { /* skip */ }
+            }
+          }
         } catch { /* skip */ }
         if (lastModified === 0) { lastModified = fs.statSync(dirPath).mtimeMs; }
         const customName = this.store.getCustomName(id);
