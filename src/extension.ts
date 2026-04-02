@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ConversationWebviewProvider } from './conversationWebviewProvider';
 import { ConversationStore } from './conversationStore';
+import { getLastUserPrompt } from './lastPromptExtractor';
 
 // Brain directory path
 const BRAIN_DIR = path.join(
@@ -215,7 +216,9 @@ export function activate(context: vscode.ExtensionContext) {
         } catch { /* skip */ }
         
         const name = webviewProvider.generateAutoNamePublic(e.name, dirPath);
-        const summary = webviewProvider.getConversationSummaryPublic(e.name, dirPath);
+        const lastPrompt = getLastUserPrompt(dirPath);
+        const dbSummary = webviewProvider.getConversationSummaryPublic(e.name, dirPath);
+        const summary = lastPrompt ? `Prompt: ${lastPrompt}` : dbSummary;
         candidates.push({ id: e.name, name, summary, mtime: latestMtime });
       }
 
