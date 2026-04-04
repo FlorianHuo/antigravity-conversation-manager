@@ -223,8 +223,11 @@ export function activate(context: vscode.ExtensionContext) {
 
         const dirPath = path.join(BRAIN_DIR, e.name);
 
-        // Skip empty conversations (no artifacts, no messages)
-        if (webviewProvider.isConversationEmptyPublic(dirPath)) { continue; }
+        // Skip empty conversations (no artifacts, no messages) — unless very recent
+        if (webviewProvider.isConversationEmptyPublic(dirPath)) {
+          const dirAge = Date.now() - fs.statSync(dirPath).mtimeMs;
+          if (dirAge > 5 * 60 * 1000) { continue; }
+        }
 
         let latestMtime = fs.statSync(dirPath).mtimeMs;
         try {
