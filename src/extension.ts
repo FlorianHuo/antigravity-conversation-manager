@@ -265,13 +265,12 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Sort: workspace matches first, then by recency
+      // Sort: recency first. Matches are indicated visually.
       candidates.sort((a, b) => {
-        if (a.isMatch !== b.isMatch) { return a.isMatch ? -1 : 1; }
         return b.mtime - a.mtime;
       });
 
-      const picks: vscode.QuickPickItem[] = candidates.slice(0, 30).map(c => ({
+      const picks: vscode.QuickPickItem[] = candidates.slice(0, 100).map(c => ({
         label: `${c.isMatch ? '$(check) ' : ''}${c.name}`,
         description: `${formatTime(c.mtime)}  ·  ${c.sizeLabel}  ${c.id.substring(0, 8)}`,
         detail: c.summary || undefined,
