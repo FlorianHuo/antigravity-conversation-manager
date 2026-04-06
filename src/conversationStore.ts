@@ -121,9 +121,9 @@ export class ConversationStore {
   associateWorkspace(id: string, workspacePath: string): void {
     const meta = this.getOrCreate(id);
     meta.workspace = workspacePath;
-    // Assign next order number if not set
+    // Assign top order number if not set so it appears at the very top
     if (meta.order === undefined) {
-      meta.order = this.getNextOrder();
+      meta.order = this.getTopOrder();
     }
     this.data.set(id, meta);
     this.save();
@@ -160,11 +160,11 @@ export class ConversationStore {
     this.setOrder(idB, orderA);
   }
 
-  private getNextOrder(): number {
-    let max = 0;
+  private getTopOrder(): number {
+    let min = 0;
     for (const meta of this.data.values()) {
-      if (meta.order !== undefined && meta.order > max) { max = meta.order; }
+      if (meta.order !== undefined && meta.order < min) { min = meta.order; }
     }
-    return max + 1;
+    return min - 1;
   }
 }
