@@ -215,9 +215,9 @@ export function activate(context: vscode.ExtensionContext) {
         if (!e.isDirectory() || !UUID_RE.test(e.name)) { continue; }
         if (currentIds.has(e.name)) { continue; }
 
-        // Exclude conversations explicitly removed or claimed by another workspace
+        // Exclude conversations claimed by another workspace (allow explicitly removed ones marked as '')
         const existingWorkspace = store.getWorkspace(e.name);
-        if (existingWorkspace !== undefined && existingWorkspace !== ws) {
+        if (existingWorkspace !== undefined && existingWorkspace !== ws && existingWorkspace !== '') {
           continue;
         }
 
