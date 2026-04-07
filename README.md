@@ -45,6 +45,12 @@ To restore original files: `python scripts/patch_workbench.py --restore`
 
 ## Changelog
 
+### v0.3.0
+
+- **QuickPick reinstated** for `+ Add` with expanded limit (up to 100 entries) and recency-first sorting.
+- **Auto-top placement**: Newly added conversations (via New or Add) now automatically appear at the top of the sidebar.
+- **Remove Fix**: Conversations explicitly removed from the sidebar now properly reappear in the `+ Add` candidate list instead of disappearing permanently.
+
 ### v0.2.0
 
 - **Drag-and-drop** card reordering (replaces up/down arrows)
