@@ -189,7 +189,11 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           const msgPath = path.join(dirPath, '.system_generated', 'messages');
           if (fs.existsSync(msgPath)) {
-            msgs = fs.readdirSync(msgPath).filter(f => f.endsWith('.json')).length;
+            msgs += fs.readdirSync(msgPath).filter(f => f.endsWith('.json')).length;
+          }
+          const logsPath = path.join(dirPath, '.system_generated', 'logs', 'overview.txt');
+          if (fs.existsSync(logsPath)) {
+            msgs += 1; // Count overview.txt as 1 consolidated msg log
           }
           artifacts = fs.readdirSync(dirPath).filter(f =>
             !f.startsWith('.') && !f.startsWith('media__')).length;
@@ -244,6 +248,17 @@ export function activate(context: vscode.ExtensionContext) {
             for (const f of fs.readdirSync(msgPath)) {
               try {
                 const fstat = fs.statSync(path.join(msgPath, f));
+                if (fstat.isFile() && fstat.mtimeMs > latestMtime) { latestMtime = fstat.mtimeMs; }
+              } catch { /* skip */ }
+            }
+          }
+          const logsPath = path.join(dirPath, '.system_generated', 'logs');
+          if (fs.existsSync(logsPath)) {
+            const logsStat = fs.statSync(logsPath);
+            if (logsStat.mtimeMs > latestMtime) { latestMtime = logsStat.mtimeMs; }
+            for (const f of fs.readdirSync(logsPath)) {
+              try {
+                const fstat = fs.statSync(path.join(logsPath, f));
                 if (fstat.isFile() && fstat.mtimeMs > latestMtime) { latestMtime = fstat.mtimeMs; }
               } catch { /* skip */ }
             }

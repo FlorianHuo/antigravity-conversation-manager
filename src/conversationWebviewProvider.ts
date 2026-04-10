@@ -174,6 +174,18 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
           return false; // It has chat history
         }
       }
+      
+      // New format Antigravity logs
+      const logsPath = path.join(dirPath, '.system_generated', 'logs', 'overview.txt');
+      if (fs.existsSync(logsPath)) {
+        return false;
+      }
+      
+      // If we have a summary extracted from the database, it's not empty
+      const id = path.basename(dirPath);
+      if (this.cachedSummaries[id]) {
+        return false;
+      }
 
       const files = fs.readdirSync(dirPath);
       // It's considered empty if it only contains the system folder or nothing
@@ -264,7 +276,7 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
               if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
             } catch { /* skip */ }
           }
-          // Also check internal messages folder
+          // Also check internal messages/logs folders
           const msgPath = path.join(dirPath, '.system_generated', 'messages');
           if (fs.existsSync(msgPath)) {
             const msgStat = fs.statSync(msgPath);
@@ -272,6 +284,18 @@ export class ConversationWebviewProvider implements vscode.WebviewViewProvider {
             for (const f of fs.readdirSync(msgPath)) {
               try {
                 const fstat = fs.statSync(path.join(msgPath, f));
+                if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
+              } catch { /* skip */ }
+            }
+          }
+          
+          const logsPath = path.join(dirPath, '.system_generated', 'logs');
+          if (fs.existsSync(logsPath)) {
+            const logsStat = fs.statSync(logsPath);
+            if (logsStat.mtimeMs > lastModified) { lastModified = logsStat.mtimeMs; }
+            for (const f of fs.readdirSync(logsPath)) {
+              try {
+                const fstat = fs.statSync(path.join(logsPath, f));
                 if (fstat.isFile() && fstat.mtimeMs > lastModified) { lastModified = fstat.mtimeMs; }
               } catch { /* skip */ }
             }

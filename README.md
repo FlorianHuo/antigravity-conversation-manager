@@ -45,6 +45,10 @@ To restore original files: `python scripts/patch_workbench.py --restore`
 
 ## Changelog
 
+### v0.3.1
+
+- **Antigravity Compatibility Fix**: Adapted to Antigravity's new structure where `.system_generated/messages/*.json` is replaced by `.system_generated/logs/overview.txt` and SQLite. Empty conversation detection, message count, and last/modified sorting now correctly process the new structure.
+
 ### v0.3.0
 
 - **QuickPick reinstated** for `+ Add` with expanded limit (up to 100 entries) and recency-first sorting.
