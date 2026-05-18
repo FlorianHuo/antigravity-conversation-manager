@@ -1,5 +1,7 @@
 # Project: antigravity-conversation-manager
 
+> **Status: maintenance freeze (2026-04-26).** Florian seldom uses Antigravity now. Project is left in working state but receives no active development. Returning to active development requires re-evaluating Antigravity-side compatibility (logging structure, extension API, sidebar service DI tokens) before any code change.
+
 A VS Code extension that manages AI conversations in the Antigravity sidebar.
 
 ## Architecture
